@@ -1,5 +1,6 @@
-#include "1035.h"
 #include <string.h> 
+#include <stdio.h> 
+#include "1035.h"
 
 unsigned short int net2short(unsigned char **bufp)
 {
@@ -241,7 +242,7 @@ void message_parse(struct message *m, unsigned char *packet)
     if(packet == 0 || m == 0) return;
 
     // keep all our mem in one (aligned) block for easy freeing
-    #define my(x,y) while(m->_len&7) m->_len++; (void*)x = (void*)(m->_packet + m->_len); m->_len += y;
+    #define my(x,y,t) while(m->_len&7) m->_len++; (x) = (t *) (m->_packet + m->_len); m->_len += (sizeof (t) * (y));
 
     // header stuff bit crap
     m->_buf = buf = packet;
@@ -265,7 +266,7 @@ void message_parse(struct message *m, unsigned char *packet)
     if(m->_len + (sizeof(struct resource) * m->arcount) > MAX_PACKET_LEN - 8) { m->arcount = 0; return; }
 
     // process questions
-    my(m->qd, sizeof(struct question) * m->qdcount);
+    my(m->qd, m->qdcount, struct question);
     for(i=0; i < m->qdcount; i++)
     {
         _label(m, &buf, &(m->qd[i].name));
@@ -274,9 +275,9 @@ void message_parse(struct message *m, unsigned char *packet)
     }
 
     // process rrs
-    my(m->an, sizeof(struct resource) * m->ancount);
-    my(m->ns, sizeof(struct resource) * m->nscount);
-    my(m->ar, sizeof(struct resource) * m->arcount);
+    my(m->an, m->ancount, struct resource);
+    my(m->ns, m->nscount, struct resource);
+    my(m->ar, m->arcount, struct resource);
     if(_rrparse(m,m->an,m->ancount,&buf)) return;
     if(_rrparse(m,m->ns,m->nscount,&buf)) return;
     if(_rrparse(m,m->ar,m->arcount,&buf)) return;

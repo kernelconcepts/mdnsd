@@ -18,6 +18,7 @@ struct question
 #define QTYPE_NS 2
 #define QTYPE_CNAME 5
 #define QTYPE_PTR 12
+#define QTYPE_TXT 16
 #define QTYPE_SRV 33
 
 struct resource
@@ -48,7 +49,7 @@ struct message
     // internal variables
     unsigned char *_buf, *_labels[20];
     int _len, _label;
-    
+
     // packet acts as padding, easier mem management
     unsigned char _packet[MAX_PACKET_LEN];
 };
