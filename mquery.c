@@ -1,21 +1,38 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 #include "mdnsd.h"
+#include "xht.h"
+#include "sdtxt.h"
+
+void txt_printer (xht h, const char *key, void *val, void *arg)
+{
+  printf ("   %s=%s\n", key, (char *) val);
+}
+
 
 // print an answer
 int ans(mdnsda a, void *arg)
 {
     int now;
+    xht h;
+    struct in_addr ip_addr;
     if(a->ttl == 0) now = 0;
     else now = a->ttl - time(0);
     switch(a->type)
     {
     case QTYPE_A:
-        printf("A %s for %d seconds to ip %s\n",a->name,now,inet_ntoa(a->ip));
+        ip_addr.s_addr = a->ip;
+        printf("A %s for %d seconds to ip %s\n",a->name,now,inet_ntoa(ip_addr));
         break;
     case QTYPE_PTR:
         printf("PTR %s for %d seconds to %s\n",a->name,now,a->rdname);
@@ -23,9 +40,17 @@ int ans(mdnsda a, void *arg)
     case QTYPE_SRV:
         printf("SRV %s for %d seconds to %s:%d\n",a->name,now,a->rdname,a->srv.port);
         break;
+    case QTYPE_TXT:
+        printf("TXT %s for %d seconds:\n",a->name,now);
+        h = txt2sd (a->rdata, a->rdlen);
+        xht_walk (h, txt_printer, NULL);
+        xht_free (h);
+        break;
     default:
         printf("%d %s for %d seconds with %d data\n",a->type,a->name,now,a->rdlen);
     }
+
+    return 0;
 }
 
 // create multicast 224.0.0.251:5353 socket
@@ -50,7 +75,7 @@ int msock()
 
     mc.imr_multiaddr.s_addr = inet_addr("224.0.0.251");
     mc.imr_interface.s_addr = htonl(INADDR_ANY);
-    setsockopt(s, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mc, sizeof(mc)); 
+    setsockopt(s, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mc, sizeof(mc));
     setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
     setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, &ittl, sizeof(ittl));
 
@@ -74,7 +99,7 @@ int main(int argc, char *argv[])
     fd_set fds;
     int s;
 
-    if(argc != 3) { printf("usage: mquery 12 _http._tcp.local.\n"); return; }
+    if(argc != 3) { printf("usage: mquery 12 _http._tcp.local.\n"); return -1; }
 
     d = mdnsd_new(1,1000);
     if((s = msock()) == 0) { printf("can't create socket: %s\n",strerror(errno)); return 1; }
