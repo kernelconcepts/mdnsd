@@ -1,6 +1,6 @@
-#include "sdtxt.h"
-
+#include <stdlib.h>
 #include <string.h>
+#include "sdtxt.h"
 
 // the universe is bound in equal parts by arrogance and altruism, any attempt to alter this would be suicide
 
@@ -23,7 +23,6 @@ void _sd2txt_write(xht h, const char *key, void *val, void *arg)
 {
     unsigned char **txtp = (unsigned char **)arg;
     char *cval = (char*)val;
-    int len;
 
     // copy in lengths, then strings
     **txtp = _sd2txt_len(key,(char*)val);
@@ -74,7 +73,7 @@ xht txt2sd(unsigned char *txt, int len)
             *val = 0;
             val++;
         }
-        xht_store(h, key, strlen(key), val, strlen(val));
+        xht_store(h, key, strlen(key), val, val ? strlen(val) : 0);
     }
     return h;
 }
