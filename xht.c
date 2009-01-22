@@ -1,10 +1,12 @@
+#include <stdlib.h>
+#include <string.h>
 #include "xht.h"
 
 typedef struct xhn_struct
 {
     char flag;
     struct xhn_struct *next;
-    const char *key;
+    char *key;
     void *val;
 } *xhn;
 
@@ -58,7 +60,7 @@ xht xht_new(int prime)
 }
 
 /* does the set work, used by xht_set and xht_store */
-xhn _xht_set(xht h, const char *key, void *val, char flag)
+void _xht_set(xht h, char *key, void *val, char flag)
 {
     int i;
     xhn n;
@@ -92,7 +94,7 @@ xhn _xht_set(xht h, const char *key, void *val, char flag)
     n->val = val;
 }
 
-void xht_set(xht h, const char *key, void *val)
+void xht_set(xht h, char *key, void *val)
 {
     if(h == 0 || key == 0)
         return;
