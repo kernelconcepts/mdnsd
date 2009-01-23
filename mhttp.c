@@ -1,9 +1,15 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <signal.h>
+#include <poll.h>
 
 #include "mdnsd.h"
 #include "sdtxt.h"
@@ -48,7 +54,7 @@ int msock()
 
     mc.imr_multiaddr.s_addr = inet_addr("224.0.0.251");
     mc.imr_interface.s_addr = htonl(INADDR_ANY);
-    setsockopt(s, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mc, sizeof(mc)); 
+    setsockopt(s, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mc, sizeof(mc));
     setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
     setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, &ittl, sizeof(ittl));
 
@@ -70,17 +76,17 @@ int main(int argc, char *argv[])
     int bsize, ssize = sizeof(struct sockaddr_in);
     unsigned char buf[MAX_PACKET_LEN];
     struct sockaddr_in from, to;
-    fd_set fds;
+    struct pollfd fds[2];
     int s;
     unsigned char *packet, hlocal[256], nlocal[256];
     int len = 0;
     xht h;
 
-    if(argc < 4) { printf("usage: mhttp 'unique name' 12.34.56.78 80 '/optionalpath'\n"); return; }
+    if(argc < 4) { printf("usage: mhttp 'unique name' 12.34.56.78 80 '/optionalpath'\n"); return -1; }
 
     ip = inet_addr(argv[2]);
     port = atoi(argv[3]);
-    printf("Announcing .local site named '%s' to %s:%d and extra path '%s'\n",argv[1],inet_ntoa(ip),port,argv[4]);
+    printf("Announcing .local site named '%s' to %s:%d and extra path '%s'\n",argv[1],argv[2],port,argv[4]);
 
     signal(SIGINT,done);
     signal(SIGHUP,done);
@@ -109,15 +115,18 @@ int main(int argc, char *argv[])
     while(1)
     {
         tv = mdnsd_sleep(d);
-        FD_ZERO(&fds);
-        FD_SET(_zzz[0],&fds);
-        FD_SET(s,&fds);
-        select(s+1,&fds,0,0,tv);
+        fds[0].fd      = _zzz[0];
+        fds[0].events  = POLLIN;
+        fds[0].revents = 0;
+        fds[1].fd      = s;
+        fds[1].events  = POLLIN;
+        fds[1].revents = 0;
+        poll (fds, 2, tv->tv_sec * 1000 + tv->tv_usec / 1000);
 
         // only used when we wake-up from a signal, shutting down
-        if(FD_ISSET(_zzz[0],&fds)) read(_zzz[0],buf,MAX_PACKET_LEN);
+        if (fds[0].revents) read(_zzz[0],buf,MAX_PACKET_LEN);
 
-        if(FD_ISSET(s,&fds))
+        if (fds[1].revents)
         {
             while((bsize = recvfrom(s,buf,MAX_PACKET_LEN,0,(struct sockaddr*)&from,&ssize)) > 0)
             {
