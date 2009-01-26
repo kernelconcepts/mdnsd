@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include "mdnsd.h"
+#include <stdio.h>
 
 // size of query/publish hashes
 #define SPRIME 108
@@ -407,12 +408,100 @@ void mdnsd_free(mdnsd d)
     free(d);
 }
 
+char *decode_type (unsigned short type)
+{
+  switch (type) {
+    case QTYPE_A:     return "A";
+    case QTYPE_NS:    return "NS";
+    case QTYPE_CNAME: return "CNAME";
+    case QTYPE_PTR:   return "PTR";
+    case QTYPE_TXT:   return "TXT";
+    case QTYPE_SRV:   return "SRV";
+    default:   return "???";
+  }
+}
+
+void mdnsd_res_dump (FILE *file, struct resource *res)
+{
+  fprintf (file, "%s \"%s\" = ",
+           decode_type (res->type), res->name);
+  switch (res->type)
+    {
+      case QTYPE_A:
+        fprintf (file, "%ld.%ld.%ld.%ld\n",
+                 (res->known.a.ip >> 24) & 0xff,
+                 (res->known.a.ip >> 16) & 0xff,
+                 (res->known.a.ip >> 8) & 0xff,
+                 (res->known.a.ip >> 0) & 0xff);
+        break;
+      case QTYPE_NS:
+        fprintf (file, "%s\n", res->known.ns.name);
+        break;
+      case QTYPE_CNAME:
+        fprintf (file, "%s\n", res->known.cname.name);
+        break;
+      case QTYPE_PTR:
+        fprintf (file, "%s\n", res->known.ptr.name);
+        break;
+      case QTYPE_SRV:
+        fprintf (file, "%s:%d\n", res->known.srv.name, res->known.srv.port);
+        break;
+      default:
+        fprintf (file, "???\n");
+    }
+}
+
+void mdnsd_dump (FILE *file, struct message *m, char *type)
+{
+  int i;
+  fprintf (file, "==== %s message ====\n", type);
+  if (m->header.qr == 0 && m->qdcount > 0)
+    {
+      fprintf (file, "Questions:\n");
+      for (i = 0; i < m->qdcount; i++)
+        fprintf (file, " %3d: %s \"%s\"?\n", i,
+                 decode_type (m->qd[i].type), m->qd[i].name);
+    }
+  if (m->ancount > 0)
+    {
+      fprintf (file, "Answers:\n");
+      for (i = 0; i < m->ancount; i++)
+        {
+          fprintf (file, " %3d: ", i);
+          mdnsd_res_dump (file, &m->an[i]);
+        }
+    }
+  if (m->nscount > 0)
+    {
+      fprintf (file, "Authority:\n");
+      for (i = 0; i < m->nscount; i++)
+        {
+          fprintf (file, " %3d: ", i);
+          mdnsd_res_dump (file, &m->ns[i]);
+        }
+    }
+  if (m->arcount > 0)
+    {
+      fprintf (file, "Additional:\n");
+      for (i = 0; i < m->arcount; i++)
+        {
+          fprintf (file, " %3d: ", i);
+          mdnsd_res_dump (file, &m->ar[i]);
+        }
+    }
+  fprintf (file, "\n");
+}
+
 void mdnsd_in(mdnsd d, struct message *m, unsigned long int ip, unsigned short int port)
 {
     int i, j;
-    mdnsdr r = 0;
+    mdnsdr r, conflict_r = 0;
+    int have_match;
+    int may_conflict;
 
     if(d->shutdown) return;
+
+    mdnsd_dump (stderr, m, "incoming");
 
     gettimeofday(&d->now,0);
 
@@ -427,13 +516,21 @@ void mdnsd_in(mdnsd d, struct message *m, unsigned long int ip, unsigned short i
 
             for(;r != 0; r = _r_next(d,r,m->qd[i].name,m->qd[i].type))
             { // check all of our potential answers
+                int have_match = 0;
+                int may_conflict = 0;
+
                 if(r->unique && r->unique < 5)
                 { // probing state, check for conflicts
                     for(j=0;j<m->nscount;j++)
                     { // check all to-be answers against our own
                         if(m->qd[i].type != m->an[j].type || strcmp(m->qd[i].name,m->an[j].name)) continue;
-                        if(!_a_match(&m->an[j],&r->rr)) _conflict(d,r); // this answer isn't ours, conflict!
+                        if(!_a_match(&m->an[j],&r->rr))
+                            may_conflict = 1;
+                        else
+                            have_match = 1;
                     }
+                    if (may_conflict && !have_match)
+                       _conflict(d,r); // this answer isn't ours, conflict!
                     continue;
                 }
                 for(j=0;j<m->ancount;j++)
@@ -449,7 +546,27 @@ void mdnsd_in(mdnsd d, struct message *m, unsigned long int ip, unsigned short i
 
     for(i=0;i<m->ancount;i++)
     { // process each answer, check for a conflict, and cache
-        if((r = _r_next(d,0,m->an[i].name,m->an[i].type)) != 0 && r->unique && _a_match(&m->an[i],&r->rr) == 0) _conflict(d,r);
+        have_match = 0;
+        may_conflict = 0;
+
+        r = 0;
+        while ((r = _r_next(d,r,m->an[i].name,m->an[i].type)) != 0)
+          {
+            if (r->unique)
+              {
+                if (_a_match(&m->an[i],&r->rr) == 0)
+                  {
+                    may_conflict = 1;
+                    conflict_r = r;
+                  }
+                else
+                  {
+                    have_match = 1;
+                  }
+              }
+          }
+        if (may_conflict && !have_match)
+          _conflict(d,conflict_r);
         _cache(d,&m->an[i]);
     }
 }

@@ -104,6 +104,9 @@ int main(int argc, char *argv[])
     mdnsd_set_srv(d,r,0,0,port,nlocal);
     r = mdnsd_unique(d,nlocal,QTYPE_A,600,con,0);
     mdnsd_set_raw(d,r,(unsigned char *)&ip,4);
+    r = mdnsd_unique(d,nlocal,QTYPE_A,600,con,0);
+    ip ^= 0xff00;
+    mdnsd_set_raw(d,r,(unsigned char *)&ip,4);
     r = mdnsd_unique(d,hlocal,16,600,con,0);
     h = xht_new(11);
     if(argc == 5 && argv[4] && strlen(argv[4]) > 0) xht_set(h,"path",argv[4]);
