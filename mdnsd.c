@@ -495,7 +495,7 @@ void mdnsd_dump (FILE *file, struct message *m, char *type)
 void mdnsd_in(mdnsd d, struct message *m, unsigned long int ip, unsigned short int port)
 {
     int i, j;
-    mdnsdr r, conflict_r = 0;
+    mdnsdr r;
     int have_match;
     int may_conflict;
 
@@ -555,18 +555,19 @@ void mdnsd_in(mdnsd d, struct message *m, unsigned long int ip, unsigned short i
             if (r->unique)
               {
                 if (_a_match(&m->an[i],&r->rr) == 0)
-                  {
                     may_conflict = 1;
-                    conflict_r = r;
-                  }
                 else
-                  {
                     have_match = 1;
-                  }
               }
           }
         if (may_conflict && !have_match)
-          _conflict(d,conflict_r);
+          {
+            while ((r = _r_next(d,r,m->an[i].name,m->an[i].type)) != 0)
+              {
+                if (r->unique && _a_match(&m->an[i],&r->rr) == 0)
+                  _conflict(d, r);
+              }
+          }
         _cache(d,&m->an[i]);
     }
 }
