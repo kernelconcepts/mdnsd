@@ -69,7 +69,7 @@ mdnsda mdnsd_list(mdnsd d, char *host, int type, mdnsda last);
 // create a new unique record (try mdnsda_list first to make sure it's not used)
 //   conflict(arg) called at any point when one is detected and unable to recover
 //   after the first data is set_*(), any future changes effectively expire the old one and attempt to create a new unique record
-mdnsdr mdnsd_unique(mdnsd d, char *host, int type, long int ttl, void (*conflict)(char *host, int type, void *arg), void *arg);
+mdnsdr mdnsd_unique(mdnsd d, char *host, int type, long int ttl, void (*conflict)(mdnsdr r, char *host, int type, void *arg), void *arg);
 // 
 // create a new shared record
 mdnsdr mdnsd_shared(mdnsd d, char *host, int type, long int ttl);

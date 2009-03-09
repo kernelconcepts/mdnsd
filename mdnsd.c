@@ -51,7 +51,7 @@ struct mdnsdr_struct
     struct mdnsda_struct rr;
     char unique; // # of checks performed to ensure
     int tries;
-    void (*conflict)(char *, int, void *);
+    void (*conflict)(mdnsdr r, char *, int, void *);
     void *arg;
     struct mdnsdr_struct *next, *list;
 };
@@ -256,7 +256,7 @@ void _q_answer(mdnsd d, struct cached *c)
 
 void _conflict(mdnsd d, mdnsdr r)
 {
-    r->conflict(r->rr.name,r->rr.type,r->arg);
+    r->conflict(r, r->rr.name,r->rr.type,r->arg);
     mdnsd_done(d,r);
 }
 
@@ -507,8 +507,6 @@ void mdnsd_in(mdnsd d, struct message *m, unsigned long int ip, unsigned short i
     int may_conflict;
 
     if(d->shutdown) return;
-
-    mdnsd_dump (stderr, m, "incoming");
 
     gettimeofday(&d->now,0);
 
@@ -822,7 +820,7 @@ mdnsdr mdnsd_shared(mdnsd d, char *host, int type, long int ttl)
     return r;
 }
 
-mdnsdr mdnsd_unique(mdnsd d, char *host, int type, long int ttl, void (*conflict)(char *host, int type, void *arg), void *arg)
+mdnsdr mdnsd_unique(mdnsd d, char *host, int type, long int ttl, void (*conflict)(mdnsdr r, char *host, int type, void *arg), void *arg)
 {
     mdnsdr r;
     r = mdnsd_shared(d,host,type,ttl);
