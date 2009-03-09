@@ -1,4 +1,5 @@
 #include <string.h>
+#include <ctype.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include "mdnsd.h"
@@ -74,7 +75,7 @@ int _namehash(const char *s)
 
     while (*name)
     { /* do some fancy bitwanking on the string */
-        h = (h << 4) + (unsigned long)(*name++);
+        h = (h << 4) + (unsigned long)(tolower (*name++));
         if ((g = (h & 0xF0000000UL))!=0)
             h ^= (g >> 24);
         h &= ~g;
@@ -89,7 +90,7 @@ struct query *_q_next(mdnsd d, struct query *q, char *host, int type)
     if(q == 0) q = d->queries[_namehash(host) % SPRIME];
     else q = q->next;
     for(;q != 0; q = q->next)
-        if(q->type == type && strcmp(q->name, host) == 0)
+        if((q->type == QTYPE_ANY || q->type == type) && strcasecmp(q->name, host) == 0)
             return q;
     return 0;
 }
@@ -98,7 +99,7 @@ struct cached *_c_next(mdnsd d, struct cached *c, char *host, int type)
     if(c == 0) c = d->cache[_namehash(host) % LPRIME];
     else c = c->next;
     for(;c != 0; c = c->next)
-        if((type == c->rr.type || type == 255) && strcmp(c->rr.name, host) == 0)
+        if((type == c->rr.type || type == QTYPE_ANY) && strcasecmp(c->rr.name, host) == 0)
             return c;
     return 0;
 }
@@ -107,7 +108,7 @@ mdnsdr _r_next(mdnsd d, mdnsdr r, char *host, int type)
     if(r == 0) r = d->published[_namehash(host) % SPRIME];
     else r = r->next;
     for(;r != 0; r = r->next)
-        if(type == r->rr.type && strcmp(r->rr.name, host) == 0)
+        if((type == r->rr.type || type == QTYPE_ANY) && strcasecmp(r->rr.name, host) == 0)
             return r;
     return 0;
 }
@@ -124,9 +125,10 @@ int _rr_len(mdnsda rr)
 
 int _a_match(struct resource *r, mdnsda a)
 { // compares new rdata with known a, painfully
-    if(strcmp(r->name,a->name) || r->type != a->type) return 0;
-    if(r->type == QTYPE_SRV && !strcmp(r->known.srv.name,a->rdname) && a->srv.port == r->known.srv.port && a->srv.weight == r->known.srv.weight && a->srv.priority == r->known.srv.priority) return 1;
-    if((r->type == QTYPE_PTR || r->type == QTYPE_NS || r->type == QTYPE_CNAME) && !strcmp(a->rdname,r->known.ns.name)) return 1;
+    if(strcasecmp(r->name,a->name) || (r->type != QTYPE_ANY && r->type != a->type)) return 0;
+    if(!strcasecmp(r->name,a->name) && r->type == QTYPE_ANY) return 1;
+    if(r->type == QTYPE_SRV && !strcasecmp(r->known.srv.name,a->rdname) && a->srv.port == r->known.srv.port && a->srv.weight == r->known.srv.weight && a->srv.priority == r->known.srv.priority) return 1;
+    if((r->type == QTYPE_PTR || r->type == QTYPE_NS || r->type == QTYPE_CNAME) && !strcasecmp(a->rdname,r->known.ns.name)) return 1;
     if(r->rdlength == a->rdlen && !memcmp(r->rdata,a->rdata,r->rdlength)) return 1;
     return 0;
 }
@@ -178,7 +180,12 @@ void _r_send(mdnsd d, mdnsdr r)
     }
     // set d->pause.tv_usec to random 20-120 msec
     d->pause.tv_sec = d->now.tv_sec;
-    d->pause.tv_usec = d->now.tv_usec + (d->now.tv_usec % 100) + 20;
+    d->pause.tv_usec = d->now.tv_usec + ((d->now.tv_usec % 101) + 20) * 1000;
+    if (d->pause.tv_usec >= 1000000)
+    {
+        d->pause.tv_sec++;
+        d->pause.tv_usec -= 1000000;
+    }
     _r_push(&d->a_pause,r);
 }
 
@@ -210,7 +217,7 @@ void _q_done(mdnsd d, struct query *q)
 { // no more query, update all it's cached entries, remove from lists
     struct cached *c = 0;
     struct query *cur;
-    int i = _namehash(q->name) % LPRIME;
+    int i = _namehash(q->name) % SPRIME;
     while((c = _c_next(d,c,q->name,q->type))) c->q = 0;
     if(d->qlist == q) d->qlist = q->list;
     else {
@@ -523,7 +530,7 @@ void mdnsd_in(mdnsd d, struct message *m, unsigned long int ip, unsigned short i
                 { // probing state, check for conflicts
                     for(j=0;j<m->nscount;j++)
                     { // check all to-be answers against our own
-                        if(m->qd[i].type != m->an[j].type || strcmp(m->qd[i].name,m->an[j].name)) continue;
+                        if(m->qd[i].type != m->an[j].type || strcasecmp(m->qd[i].name,m->an[j].name)) continue;
                         if(!_a_match(&m->an[j],&r->rr))
                             may_conflict = 1;
                         else
@@ -535,7 +542,7 @@ void mdnsd_in(mdnsd d, struct message *m, unsigned long int ip, unsigned short i
                 }
                 for(j=0;j<m->ancount;j++)
                 { // check the known answers for this question
-                    if(m->qd[i].type != m->an[j].type || strcmp(m->qd[i].name,m->an[j].name)) continue;
+                    if((m->qd[i].type != QTYPE_ANY && m->qd[i].type != m->an[j].type) || strcasecmp(m->qd[i].name,m->an[j].name)) continue;
                     if(_a_match(&m->an[j],&r->rr)) break; // they already have this answer
                 }
                 if(j == m->ancount) _r_send(d,r);
@@ -664,7 +671,7 @@ int mdnsd_out(mdnsd d, struct message *m, unsigned long int *ip, unsigned short 
                 r = next;
                 continue;
             }
-            message_qd(m, r->rr.name, r->rr.type, d->class);
+            message_qd(m, r->rr.name, QTYPE_ANY, d->class);
             last = r;
             r = r->list;
         }
