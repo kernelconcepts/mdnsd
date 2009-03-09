@@ -15,7 +15,7 @@
 #include "sdtxt.h"
 
 // conflict!
-void con(char *name, int type, void *arg)
+void con(mdnsdr r, char *name, int type, void *arg)
 {
     printf("conflicting name detected %s for type %d\n",name,type);
     exit(1);
