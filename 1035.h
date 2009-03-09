@@ -20,6 +20,7 @@ struct question
 #define QTYPE_PTR 12
 #define QTYPE_TXT 16
 #define QTYPE_SRV 33
+#define QTYPE_ANY 255
 
 struct resource
 {
