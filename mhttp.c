@@ -36,6 +36,7 @@ typedef struct _ipcam_ip_info
   char          *label;
   char          *ip;
   int            link_id;
+  long int       announce_ip;
 
   /* service-discovery records */
   mdnsdr         host_to_ip;
@@ -112,11 +113,11 @@ handle_conflict (mdnsdr r, char *name, int type, void *arg)
           info->ipinfos[i].ip_to_host = NULL;
           fprintf (stderr, "zeroconf reverse lookup conflict for %s!\n", info->ipinfos[i].label);
           return;
-	}
+        }
       if (r == info->ipinfos[i].host_to_ip)
         {
-	  info->ipinfos[i].host_to_ip = NULL;
-	}
+          info->ipinfos[i].host_to_ip = NULL;
+        }
     }
 
   if (info->servicename == NULL)
@@ -205,22 +206,37 @@ request_ip_addresses (IpcamServiceInfo *info, char *hostlocal)
       if (info->ipinfos[i].ip)
         {
           ip = inet_addr (info->ipinfos[i].ip);
-          snprintf (revlookup, 256, "%ld.%ld.%ld.%ld.in-addr.arpa.",
-                    (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, (ip >> 0) & 0xff);
 
-          if (!info->ipinfos[i].host_to_ip)
+          if (ip != info->ipinfos[i].announce_ip)
             {
-              info->ipinfos[i].host_to_ip  = mdnsd_unique (info->dnsd, hostlocal,
-                                                           QTYPE_A, 120, handle_conflict, info);
+              snprintf (revlookup, 256, "%ld.%ld.%ld.%ld.in-addr.arpa.",
+                        (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, (ip >> 0) & 0xff);
+
+              if (!info->ipinfos[i].host_to_ip)
+                {
+                  info->ipinfos[i].host_to_ip  = mdnsd_unique (info->dnsd, hostlocal,
+                                                               QTYPE_A, 120, handle_conflict, info);
+                }
+              mdnsd_set_raw (info->dnsd, info->ipinfos[i].host_to_ip, (unsigned char *) &ip, 4);
+
+              if (!info->ipinfos[i].ip_to_host)
+                {
+                  info->ipinfos[i].ip_to_host  = mdnsd_unique (info->dnsd, revlookup,
+                                                               QTYPE_PTR, 120, handle_conflict, info);
+                }
+              mdnsd_set_host (info->dnsd, info->ipinfos[i].ip_to_host, hostlocal);
             }
-          mdnsd_set_raw (info->dnsd, info->ipinfos[i].host_to_ip, (unsigned char *) &ip, 4);
-         
-          if (!info->ipinfos[i].ip_to_host)
-            {
-              info->ipinfos[i].ip_to_host  = mdnsd_unique (info->dnsd, revlookup,
-                                                           QTYPE_PTR, 120, handle_conflict, info);
-            }
-          mdnsd_set_host (info->dnsd, info->ipinfos[i].ip_to_host, hostlocal);
+        }
+      else
+        {
+          if (info->ipinfos[i].host_to_ip)
+            mdnsd_done (ipcam_info.dnsd, info->ipinfos[i].host_to_ip);
+          if (info->ipinfos[i].ip_to_host)
+            mdnsd_done (ipcam_info.dnsd, info->ipinfos[i].ip_to_host);
+
+          info->ipinfos[i].host_to_ip = NULL;
+          info->ipinfos[i].ip_to_host = NULL;
+          info->ipinfos[i].announce_ip = 0;
         }
     }
 }
@@ -252,7 +268,7 @@ request_service (IpcamServiceInfo *info, int stage)
   switch (stage)
     {
       case 0:
-	request_ip_addresses (info, hostlocal);
+        request_ip_addresses (info, hostlocal);
 
         break;
 
@@ -284,11 +300,11 @@ request_service (IpcamServiceInfo *info, int stage)
         mdnsd_set_host (info->dnsd, info->ptr_to_srv, servlocal);
 
         for (i = 0; i < MAX_ANNOUNCE_IP; i++)
-	  {
+          {
             if (info->ipinfos[i].ip)
               fprintf (stderr, "Announcing .local site named '%s' to %s:%d (%s)\n", hostlocal,
                        info->ipinfos[i].ip, info->port, servlocal);
-	  }
+          }
         break;
 
       default:
@@ -342,7 +358,7 @@ iface_change_callback (int   link_index,
           info->ipinfos[i].ip = strdup (ipaddr);
           info->ipinfos[i].link_id = link_index;
         }
-     
+
       if (!add && info->ipinfos[i].ip)
         {
           free (info->ipinfos[i].ip);
@@ -413,14 +429,15 @@ int main(int argc, char *argv[])
     strchr (ipcam_info.hostname, '.')[0] = '\0';
 
   ipcam_info.servicename = NULL;
-  
+
   for (i = 0; i < MAX_ANNOUNCE_IP; i++)
     {
-      ipcam_info.ipinfos[i].label      = argv[i+1];
-      ipcam_info.ipinfos[i].ip         = NULL;
-      ipcam_info.ipinfos[i].link_id    = -1;
-      ipcam_info.ipinfos[i].host_to_ip = NULL;
-      ipcam_info.ipinfos[i].ip_to_host = NULL;
+      ipcam_info.ipinfos[i].label       = argv[i+1];
+      ipcam_info.ipinfos[i].ip          = NULL;
+      ipcam_info.ipinfos[i].link_id     = -1;
+      ipcam_info.ipinfos[i].announce_ip = 0;
+      ipcam_info.ipinfos[i].host_to_ip  = NULL;
+      ipcam_info.ipinfos[i].ip_to_host  = NULL;
     }
 
   ipcam_info.port = atoi(argv[3]);
@@ -584,15 +601,15 @@ int main(int argc, char *argv[])
             ipcam_info.srv_to_host    = NULL;
             ipcam_info.txt_for_srv    = NULL;
 
-	    for (i = 0; i < MAX_ANNOUNCE_IP; i++)
-	      {
-	        if (ipcam_info.ipinfos[i].host_to_ip)
-		  mdnsd_done (ipcam_info.dnsd, ipcam_info.ipinfos[i].host_to_ip);
-	        if (ipcam_info.ipinfos[i].ip_to_host)
-		  mdnsd_done (ipcam_info.dnsd, ipcam_info.ipinfos[i].ip_to_host);
-	        ipcam_info.ipinfos[i].host_to_ip = NULL;
-		ipcam_info.ipinfos[i].ip_to_host = NULL;
-	      }
+            for (i = 0; i < MAX_ANNOUNCE_IP; i++)
+              {
+                if (ipcam_info.ipinfos[i].host_to_ip)
+                  mdnsd_done (ipcam_info.dnsd, ipcam_info.ipinfos[i].host_to_ip);
+                if (ipcam_info.ipinfos[i].ip_to_host)
+                  mdnsd_done (ipcam_info.dnsd, ipcam_info.ipinfos[i].ip_to_host);
+                ipcam_info.ipinfos[i].host_to_ip = NULL;
+                ipcam_info.ipinfos[i].ip_to_host = NULL;
+              }
 
             ipcam_info.state = MDNSD_ANNOUNCE;
             announce_stage = 0;
