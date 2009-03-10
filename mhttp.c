@@ -36,11 +36,11 @@ typedef struct _ipcam_ip_info
   char          *label;
   char          *ip;
   int            link_id;
-  long int       announce_ip;
 
   /* service-discovery records */
   mdnsdr         host_to_ip;
   mdnsdr         ip_to_host;
+  long int       announce_ip;
 } IpcamIPInfo;
 
 typedef struct _ipcam_service_info
@@ -68,7 +68,8 @@ static IpcamServiceInfo ipcam_info;
 static int signal_pipe[2];
 static int fifo_fd;
 
-void     request_service (IpcamServiceInfo *info, int stage);
+void     request_service      (IpcamServiceInfo *info, int stage);
+void     request_ip_addresses (IpcamServiceInfo *info);
 
 char *
 increment_name (char *name)
@@ -117,6 +118,7 @@ handle_conflict (mdnsdr r, char *name, int type, void *arg)
       if (r == info->ipinfos[i].host_to_ip)
         {
           info->ipinfos[i].host_to_ip = NULL;
+          info->ipinfos[i].announce_ip = 0;
         }
     }
 
@@ -195,11 +197,15 @@ msock ()
 }
 
 void
-request_ip_addresses (IpcamServiceInfo *info, char *hostlocal)
+request_ip_addresses (IpcamServiceInfo *info)
 {
-  char revlookup[256];
+  char revlookup[256], hostlocal[256];
   int i;
   long int ip;
+  int num_ips = 0;
+
+  sprintf (hostlocal, "%s.local.",
+           info->servicename ? info->servicename : info->hostname);
 
   for (i = 0; i < MAX_ANNOUNCE_IP; i++)
     {
@@ -225,7 +231,11 @@ request_ip_addresses (IpcamServiceInfo *info, char *hostlocal)
                                                                QTYPE_PTR, 120, handle_conflict, info);
                 }
               mdnsd_set_host (info->dnsd, info->ipinfos[i].ip_to_host, hostlocal);
+
+              info->ipinfos[i].announce_ip = ip;
             }
+
+          num_ips++;
         }
       else
         {
@@ -239,6 +249,9 @@ request_ip_addresses (IpcamServiceInfo *info, char *hostlocal)
           info->ipinfos[i].announce_ip = 0;
         }
     }
+
+  if (!num_ips)
+    info->state = MDNSD_STARTUP;
 }
 
 void
@@ -248,8 +261,6 @@ request_service (IpcamServiceInfo *info, int stage)
   int i, len = 0;
 
   sprintf (servlocal, "%s._http._tcp.local.",
-           info->servicename ? info->servicename : info->hostname);
-  sprintf (hostlocal, "%s.local.",
            info->servicename ? info->servicename : info->hostname);
 
   /*
@@ -268,11 +279,14 @@ request_service (IpcamServiceInfo *info, int stage)
   switch (stage)
     {
       case 0:
-        request_ip_addresses (info, hostlocal);
+        request_ip_addresses (info);
 
         break;
 
       case 1:
+        sprintf (hostlocal, "%s.local.",
+                 info->servicename ? info->servicename : info->hostname);
+
         if (!info->srv_to_host)
           {
             info->srv_to_host = mdnsd_unique (info->dnsd, servlocal,
@@ -302,8 +316,9 @@ request_service (IpcamServiceInfo *info, int stage)
         for (i = 0; i < MAX_ANNOUNCE_IP; i++)
           {
             if (info->ipinfos[i].ip)
-              fprintf (stderr, "Announcing .local site named '%s' to %s:%d (%s)\n", hostlocal,
-                       info->ipinfos[i].ip, info->port, servlocal);
+              fprintf (stderr, "Announcing \"%s.local\" to %s:%d\n",
+                       info->servicename ? info->servicename : info->hostname,
+                       info->ipinfos[i].ip, info->port);
           }
         break;
 
@@ -357,17 +372,27 @@ iface_change_callback (int   link_index,
             free (info->ipinfos[i].ip);
           info->ipinfos[i].ip = strdup (ipaddr);
           info->ipinfos[i].link_id = link_index;
+          fprintf (stderr, "new ip address on %s: %s\n", label, ipaddr);
         }
 
       if (!add && info->ipinfos[i].ip)
         {
+          fprintf (stderr, "lost ip address on %s\n", label);
           free (info->ipinfos[i].ip);
           info->ipinfos[i].ip = NULL;
           info->ipinfos[i].link_id = -1;
         }
     }
 
-  info->state = MDNSD_PROBE;
+  if (add && info->state == MDNSD_STARTUP)
+    {
+      info->state = MDNSD_PROBE;
+    }
+  else
+    {
+      request_ip_addresses (info);
+    }
+
   write (signal_pipe[1], " ", 1);
 }
 
@@ -607,8 +632,9 @@ int main(int argc, char *argv[])
                   mdnsd_done (ipcam_info.dnsd, ipcam_info.ipinfos[i].host_to_ip);
                 if (ipcam_info.ipinfos[i].ip_to_host)
                   mdnsd_done (ipcam_info.dnsd, ipcam_info.ipinfos[i].ip_to_host);
-                ipcam_info.ipinfos[i].host_to_ip = NULL;
-                ipcam_info.ipinfos[i].ip_to_host = NULL;
+                ipcam_info.ipinfos[i].host_to_ip  = NULL;
+                ipcam_info.ipinfos[i].ip_to_host  = NULL;
+                ipcam_info.ipinfos[i].announce_ip = 0;
               }
 
             ipcam_info.state = MDNSD_ANNOUNCE;
