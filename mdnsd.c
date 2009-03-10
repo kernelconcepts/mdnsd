@@ -528,7 +528,7 @@ void mdnsd_in(mdnsd d, struct message *m, unsigned long int ip, unsigned short i
                 { // probing state, check for conflicts
                     for(j=0;j<m->nscount;j++)
                     { // check all to-be answers against our own
-                        if(m->qd[i].type != m->an[j].type || strcasecmp(m->qd[i].name,m->an[j].name)) continue;
+                        if(m->an[j].ttl == 0 || m->qd[i].type != m->an[j].type || strcasecmp(m->qd[i].name,m->an[j].name)) continue;
                         if(!_a_match(&m->an[j],&r->rr))
                             may_conflict = 1;
                         else
@@ -569,7 +569,7 @@ void mdnsd_in(mdnsd d, struct message *m, unsigned long int ip, unsigned short i
           {
             while ((r = _r_next(d,r,m->an[i].name,m->an[i].type)) != 0)
               {
-                if (r->unique && _a_match(&m->an[i],&r->rr) == 0)
+                if (r->unique && _a_match(&m->an[i],&r->rr) == 0 && m->an[i].ttl > 0)
                   _conflict(d, r);
               }
           }
