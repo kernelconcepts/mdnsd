@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -10,148 +12,632 @@
 #include <errno.h>
 #include <signal.h>
 #include <poll.h>
+#include <sys/time.h>
 
 #include "mdnsd.h"
 #include "sdtxt.h"
+#include "netwatch.h"
 
-// conflict!
-void con(mdnsdr r, char *name, int type, void *arg)
+#define HOSTNAMESIZE 64
+#define FIFO_PATH "/tmp/mdns-fifo"
+
+enum {
+   MDNSD_STARTUP,
+   MDNSD_PROBE,
+   MDNSD_ANNOUNCE,
+   MDNSD_RUN,
+   MDNSD_SHUTDOWN
+};
+
+typedef struct _ipcam_service_info
 {
-    printf("conflicting name detected %s for type %d\n",name,type);
-    exit(1);
+  mdnsd          dnsd;
+  char           hostname[HOSTNAMESIZE];
+  char          *servicename;
+
+  int            port;
+  char          *label;
+  char          *ip;
+  int            link;
+
+  xht            metadata;
+
+  /* service-discovery records */
+  mdnsdr         host_to_ip;
+  mdnsdr         ip_to_host;
+
+  mdnsdr         srv_to_host;
+  mdnsdr         txt_for_srv;
+
+  mdnsdr         ptr_to_srv;
+
+  int            state;
+} IpcamServiceInfo;
+
+static IpcamServiceInfo ipcam_info;
+static int signal_pipe[2];
+static int fifo_fd;
+
+void     request_service (IpcamServiceInfo *info, int stage);
+
+char *
+increment_name (char *name)
+{
+  int   id = 1;
+  char *pos, *end = NULL;
+  char *ret = NULL;
+
+  pos = strrchr (name, '-');
+
+  if (pos)
+    {
+      id = strtol (pos + 1, &end, 10);
+      if (*end == '\0')
+        *pos = '\0';
+      else
+        id = 1;
+    }
+
+  id += 1;
+
+  asprintf (&ret, "%s-%d", name, id);
+
+  return ret;
 }
 
-// quit
-int _shutdown = 0;
-mdnsd _d;
-int _zzz[2];
-void done(int sig)
+
+/* conflict handling */
+void
+handle_conflict (char *name, int type, void *arg)
 {
-    _shutdown = 1;
-    mdnsd_shutdown(_d);
-    write(_zzz[1]," ",1);
+  IpcamServiceInfo *info = (IpcamServiceInfo *) arg;
+  char *newname;
+
+  if (info->servicename == NULL)
+    {
+      newname = increment_name (info->hostname);
+    }
+  else
+    {
+      newname = increment_name (info->servicename);
+      free (info->servicename);
+    }
+
+  info->servicename = newname;
+
+  switch (type)
+    {
+      case QTYPE_A:
+        info->host_to_ip = NULL;
+        break;
+      case QTYPE_PTR:
+        info->ip_to_host = NULL;
+        break;
+      case QTYPE_SRV:
+        info->srv_to_host = NULL;
+        break;
+      case QTYPE_TXT:
+        info->txt_for_srv = NULL;
+        break;
+      default:
+        fprintf (stderr, "Huh?\n");
+    }
+  fprintf (stderr, "conflicting name \"%s\". trying %s\n",
+           name, info->servicename);
+
+  info->state = MDNSD_PROBE;
+  write (signal_pipe[1], " ", 1);
 }
 
-// create multicast 224.0.0.251:5353 socket
-int msock()
+
+/* quit and updates */
+void sighandler (int sig)
 {
-    int s, flag = 1, ittl = 255;
-    struct sockaddr_in in;
-    struct ip_mreq mc;
-    char ttl = 255;
+  if (sig != SIGHUP)
+    {
+      ipcam_info.state = MDNSD_SHUTDOWN;
+    }
 
-    bzero(&in, sizeof(in));
-    in.sin_family = AF_INET;
-    in.sin_port = htons(5353);
-    in.sin_addr.s_addr = 0;
-
-    if((s = socket(AF_INET,SOCK_DGRAM,0)) < 0) return 0;
-#ifdef SO_REUSEPORT
-    setsockopt(s, SOL_SOCKET, SO_REUSEPORT, (char*)&flag, sizeof(flag));
-#endif
-    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (char*)&flag, sizeof(flag));
-    if(bind(s,(struct sockaddr*)&in,sizeof(in))) { close(s); return 0; }
-
-    mc.imr_multiaddr.s_addr = inet_addr("224.0.0.251");
-    mc.imr_interface.s_addr = htonl(INADDR_ANY);
-    setsockopt(s, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mc, sizeof(mc));
-    setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
-    setsockopt(s, IPPROTO_IP, IP_MULTICAST_TTL, &ittl, sizeof(ittl));
-
-    flag =  fcntl(s, F_GETFL, 0);
-    flag |= O_NONBLOCK;
-    fcntl(s, F_SETFL, flag);
-
-    return s;
+  write (signal_pipe[1], " ", 1);
 }
+
+
+/* create multicast 224.0.0.251:5353 socket */
+int
+msock ()
+{
+  int s, flag = 1, ittl = 255;
+  struct sockaddr_in in;
+  struct ip_mreq mc;
+  char ttl = 255;
+
+  bzero (&in, sizeof (in));
+  in.sin_family = AF_INET;
+  in.sin_port = htons (5353);
+  in.sin_addr.s_addr = 0;
+
+  if ((s = socket (AF_INET,SOCK_DGRAM,0)) < 0)
+    return 0;
+
+  setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (char*) &flag, sizeof (flag));
+  if (bind (s, (struct sockaddr*) &in, sizeof (in)))
+    {
+      close(s);
+      return 0;
+    }
+
+  mc.imr_multiaddr.s_addr = inet_addr ("224.0.0.251");
+  mc.imr_interface.s_addr = htonl (INADDR_ANY);
+  setsockopt (s, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mc,   sizeof (mc));
+  setsockopt (s, IPPROTO_IP, IP_MULTICAST_TTL,  &ttl,  sizeof (ttl));
+  setsockopt (s, IPPROTO_IP, IP_MULTICAST_TTL,  &ittl, sizeof (ittl));
+
+  flag =  fcntl (s, F_GETFL, 0);
+  flag |= O_NONBLOCK;
+  fcntl (s, F_SETFL, flag);
+
+  return s;
+}
+
+void
+request_service (IpcamServiceInfo *info, int stage)
+{
+  unsigned char *packet, servlocal[256], hostlocal[256], revlookup[256];
+  int len = 0;
+  unsigned long ip;
+
+  if (!info->ip)
+    return;
+
+  ip = inet_addr (info->ip);
+
+  sprintf (servlocal, "%s._http._tcp.local.",
+           info->servicename ? info->servicename : info->hostname);
+  sprintf (hostlocal, "%s.local.",
+           info->servicename ? info->servicename : info->hostname);
+  sprintf (revlookup, "%ld.%ld.%ld.%ld.in-addr.arpa.",
+           (ip >> 24) & 0xff, (ip >> 16) & 0xff, (ip >> 8) & 0xff, (ip >> 0) & 0xff);
+
+  /*
+   * Timeouts according to
+   *   http://files.multicastdns.org/draft-cheshire-dnsext-multicastdns.txt
+   *
+   * As a general rule, the recommended TTL value for Multicast DNS
+   * resource records with a host name as the resource record's name
+   * (e.g. A, AAAA, HINFO, etc.) or contained within the resource record's
+   * rdata (e.g. SRV, reverse mapping PTR record, etc.) is 120 seconds.
+   *
+   * The recommended TTL value for other Multicast DNS resource records
+   * is 75 minutes.
+   */
+
+  switch (stage)
+    {
+      case 0:
+        if (!info->host_to_ip)
+          {
+            info->host_to_ip  = mdnsd_unique (info->dnsd, hostlocal,
+                                              QTYPE_A, 120, handle_conflict, info);
+          }
+        mdnsd_set_raw (info->dnsd, info->host_to_ip, (unsigned char *) &ip, 4);
+
+        if (!info->ip_to_host)
+          {
+            info->ip_to_host  = mdnsd_unique (info->dnsd, revlookup,
+                                              QTYPE_PTR, 120, handle_conflict, info);
+          }
+        mdnsd_set_host (info->dnsd, info->ip_to_host, hostlocal);
+        break;
+
+      case 1:
+        if (!info->srv_to_host)
+          {
+            info->srv_to_host = mdnsd_unique (info->dnsd, servlocal,
+                                              QTYPE_SRV, 120, handle_conflict, info);
+          }
+        mdnsd_set_srv (info->dnsd, info->srv_to_host, 0, 0,
+                       info->port, hostlocal);
+
+        if (!info->txt_for_srv)
+          {
+            info->txt_for_srv = mdnsd_unique (info->dnsd, servlocal,
+                                              QTYPE_TXT, 4500, handle_conflict, info);
+          }
+        packet = sd2txt (info->metadata, &len);
+        mdnsd_set_raw (info->dnsd, info->txt_for_srv, packet, len);
+        free(packet);
+        break;
+
+      case 2:
+        if (!info->ptr_to_srv)
+          {
+            info->ptr_to_srv  = mdnsd_shared (info->dnsd, "_http._tcp.local.",
+                                              QTYPE_PTR, 4500);
+          }
+        mdnsd_set_host (info->dnsd, info->ptr_to_srv, servlocal);
+
+        fprintf (stderr, "Announcing .local site named '%s' to %s:%d (%s)\n", hostlocal,
+                 info->ip, info->port, servlocal);
+        break;
+
+      default:
+        fprintf (stderr, "announce stage %d is invalid\n", stage);
+        break;
+    }
+}
+
+void
+update_port_info (IpcamServiceInfo *info, int port)
+{
+  unsigned char hostlocal[256];
+
+  if (port == info->port)
+    return;
+
+  info->port = port;
+
+  if (!info->srv_to_host)
+    return;
+
+  sprintf (hostlocal, "%s.local.",
+           info->servicename ? info->servicename : info->hostname);
+
+  fprintf (stderr, "mhttp: updating port info to port %d\n", info->port);
+  mdnsd_set_srv (info->dnsd, info->srv_to_host, 0, 0,
+                 info->port, hostlocal);
+}
+
+void
+iface_change_callback (int   link_index,
+                       char *label,
+                       char *ipaddr,
+                       int   add,
+                       void *user_data)
+{
+  IpcamServiceInfo *info = (IpcamServiceInfo *) user_data;
+
+  if (strcmp (info->label, label) != 0)
+    return;
+
+  if (add && (!info->ip ||
+              strcmp (info->ip, ipaddr) != 0 ||
+              info->link != link_index))
+    {
+      if (info->ip)
+        free (info->ip);
+      info->ip = strdup (ipaddr);
+      info->link = link_index;
+    }
+
+  if (!add && info->ip)
+    {
+      free (info->ip);
+      info->ip = NULL;
+      info->link = -1;
+    }
+
+  info->state = MDNSD_PROBE;
+  write (signal_pipe[1], " ", 1);
+}
+
+
+void
+iface_link_callback (int   link_index,
+                     int   running,
+                     void *user_data)
+{
+  IpcamServiceInfo *info = (IpcamServiceInfo *) user_data;
+
+  if (link_index != info->link)
+    return;
+
+
+  info->state = running ? MDNSD_PROBE : MDNSD_STARTUP;
+  write (signal_pipe[1], " ", 1);
+}
+
 
 int main(int argc, char *argv[])
 {
-    mdnsd d;
-    mdnsdr r;
-    struct message m;
-    unsigned long int ip;
-    unsigned short int port;
-    struct timeval *tv;
-    int bsize, ssize = sizeof(struct sockaddr_in);
-    unsigned char buf[MAX_PACKET_LEN];
-    struct sockaddr_in from, to;
-    struct pollfd fds[2];
-    int s;
-    unsigned char *packet, hlocal[256], nlocal[256];
-    int len = 0;
-    xht h;
+  struct message msg;
+  unsigned short int port;
+  struct timeval tv;
+  int bsize, ssize = sizeof(struct sockaddr_in);
+  unsigned char buf[MAX_PACKET_LEN];
+  struct sockaddr_in from, to;
+  int i, s;
+  int nlink;
+  unsigned long remote_ip;
+  char *value;
+  int polltime = 0;
+  int announce_stage = 0;
+  struct pollfd fds[4];
 
-    if(argc < 4) { printf("usage: mhttp 'unique name' 12.34.56.78 80 '/optionalpath'\n"); return -1; }
-
-    ip = inet_addr(argv[2]);
-    port = atoi(argv[3]);
-    printf("Announcing .local site named '%s' to %s:%d and extra path '%s'\n",argv[1],argv[2],port,argv[4]);
-
-    signal(SIGINT,done);
-    signal(SIGHUP,done);
-    signal(SIGQUIT,done);
-    signal(SIGTERM,done);
-    pipe(_zzz);
-    _d = d = mdnsd_new(1,1000);
-    if((s = msock()) == 0) { printf("can't create socket: %s\n",strerror(errno)); return 1; }
-
-    sprintf(hlocal,"%s._http._tcp.local.",argv[1]);
-    sprintf(nlocal,"http-%s.local.",argv[1]);
-    r = mdnsd_shared(d,"_http._tcp.local.",QTYPE_PTR,120);
-    mdnsd_set_host(d,r,hlocal);
-    r = mdnsd_unique(d,hlocal,QTYPE_SRV,600,con,0);
-    mdnsd_set_srv(d,r,0,0,port,nlocal);
-    r = mdnsd_unique(d,nlocal,QTYPE_A,600,con,0);
-    mdnsd_set_raw(d,r,(unsigned char *)&ip,4);
-    r = mdnsd_unique(d,nlocal,QTYPE_A,600,con,0);
-    ip ^= 0xff00;
-    mdnsd_set_raw(d,r,(unsigned char *)&ip,4);
-    r = mdnsd_unique(d,hlocal,16,600,con,0);
-    h = xht_new(11);
-    if(argc == 5 && argv[4] && strlen(argv[4]) > 0) xht_set(h,"path",argv[4]);
-    packet = sd2txt(h, &len);
-    xht_free(h);
-    mdnsd_set_raw(d,r,packet,len);
-    free(packet);
-
-    while(1)
+  if(argc < 3)
     {
-        tv = mdnsd_sleep(d);
-        fds[0].fd      = _zzz[0];
-        fds[0].events  = POLLIN;
-        fds[0].revents = 0;
-        fds[1].fd      = s;
-        fds[1].events  = POLLIN;
-        fds[1].revents = 0;
-        poll (fds, 2, tv->tv_sec * 1000 + tv->tv_usec / 1000);
-
-        // only used when we wake-up from a signal, shutting down
-        if (fds[0].revents) read(_zzz[0],buf,MAX_PACKET_LEN);
-
-        if (fds[1].revents)
-        {
-            while((bsize = recvfrom(s,buf,MAX_PACKET_LEN,0,(struct sockaddr*)&from,&ssize)) > 0)
-            {
-                bzero(&m,sizeof(struct message));
-                message_parse(&m,buf);
-                mdnsd_in(d,&m,(unsigned long int)from.sin_addr.s_addr,from.sin_port);
-            }
-            if(bsize < 0 && errno != EAGAIN) { printf("can't read from socket %d: %s\n",errno,strerror(errno)); return 1; }
-        }
-        while(mdnsd_out(d,&m,&ip,&port))
-        {
-            bzero(&to, sizeof(to));
-            to.sin_family = AF_INET;
-            to.sin_port = port;
-            to.sin_addr.s_addr = ip;
-            if(sendto(s,message_packet(&m),message_packet_len(&m),0,(struct sockaddr *)&to,sizeof(struct sockaddr_in)) != message_packet_len(&m))  { printf("can't write to socket: %s\n",strerror(errno)); return 1; }
-        }
-        if(_shutdown) break;
+      fprintf (stderr, "usage: mhttp <label> <port> <key1>=<value1> <key2>=<value2> ...\n");
+      fprintf (stderr, "   <label> is the label of the network interface to be watched\n");
+      fprintf (stderr, "   <port> is the port number of the service to be advertized\n");
+      fprintf (stderr, "   <key>=<value> are the keys that get embedded into the TXT record.\n");
+      fprintf (stderr, "\n   The port later can be changed by writing \"port:8080\" to " FIFO_PATH ".\n");
+      return -1;
     }
 
-    mdnsd_shutdown(d);
-    mdnsd_free(d);
-    return 0;
+  ipcam_info.dnsd = mdnsd_new (1, 1000);
+
+  ipcam_info.state = MDNSD_STARTUP;
+
+  gethostname (ipcam_info.hostname, HOSTNAMESIZE);
+  ipcam_info.hostname[HOSTNAMESIZE-1] = '\0';
+  if (strchr (ipcam_info.hostname, '.'))
+    strchr (ipcam_info.hostname, '.')[0] = '\0';
+
+  ipcam_info.servicename = NULL;
+  ipcam_info.label = argv[1];
+  ipcam_info.ip = NULL;
+  ipcam_info.link = -1;
+  ipcam_info.port = atoi(argv[2]);
+
+  ipcam_info.metadata = xht_new (11);
+  for (i = 3; i < argc; i++)
+    {
+      value = index (argv[i], '=');
+      if (value)
+        {
+          value[0] = '\0';
+          value++;
+          xht_set (ipcam_info.metadata, argv[i], value);
+        }
+    }
+
+  ipcam_info.ptr_to_srv  = NULL;
+  ipcam_info.srv_to_host = NULL;
+  ipcam_info.txt_for_srv = NULL;
+  ipcam_info.host_to_ip  = NULL;
+  ipcam_info.ip_to_host  = NULL;
+
+  pipe (signal_pipe);
+  signal(SIGHUP,  sighandler);
+  signal(SIGINT,  sighandler);
+  signal(SIGQUIT, sighandler);
+  signal(SIGTERM, sighandler);
+
+  if ((s = msock()) == 0)
+    {
+      fprintf (stderr, "can't create socket: %s\n", strerror(errno));
+      return -1;
+    }
+
+  if ((nlink = netwatch_open ()) < 0)
+    {
+      fprintf (stderr, "can't connect to netlink: %s\n", strerror(errno));
+      return -1;
+    }
+
+  netwatch_register_callbacks (iface_change_callback,
+                               iface_link_callback,
+			       &ipcam_info);
+  netwatch_queue_inforequest (nlink);
+
+
+  if (mkfifo (FIFO_PATH, S_IRWXU) < 0)
+    {
+      if (errno != EEXIST)
+        {
+          fprintf (stderr, "can't create named pipe: %s\n", strerror(errno));
+          return -1;
+        }
+    }
+
+  if ((fifo_fd = open (FIFO_PATH, O_RDONLY | O_NONBLOCK)) < 0)
+    {
+      fprintf (stderr, "can't open named pipe: %s\n", strerror(errno));
+      return -1;
+    }
+
+  /* we need to open the fifo for writing as well (although we'll never
+   * use it for this) to avoid POLLHUP to happen when no client wants
+   * something from us. Ugh. */
+
+  if ((i = open (FIFO_PATH, O_WRONLY)) < 0)
+    {
+      fprintf (stderr, "can't dummy-open write end of pipe: %s\n",
+               strerror(errno));
+      return -1;
+    }
+
+  while(1)
+    {
+      fds[0].fd      = signal_pipe[0];
+      fds[0].events  = POLLIN;
+      fds[0].revents = 0;
+      fds[1].fd      = s;
+      fds[1].events  = POLLIN;
+      fds[1].revents = 0;
+      fds[2].fd      = nlink;
+      fds[2].events  = POLLIN;
+      fds[2].revents = 0;
+      fds[3].fd      = fifo_fd;
+      fds[3].events  = POLLIN;
+      fds[3].revents = 0;
+
+      poll (fds, 4, polltime);
+
+      /* only used when we wake-up from a signal */
+      if (fds[0].revents)
+        {
+          char hostname[HOSTNAMESIZE];
+
+          read (signal_pipe[0], buf, MAX_PACKET_LEN);
+
+          gethostname (hostname, HOSTNAMESIZE);
+          hostname[HOSTNAMESIZE-1] = '\0';
+          if (strchr (hostname, '.'))
+            strchr (hostname, '.')[0] = '\0';
+          if (strcmp (hostname, ipcam_info.hostname))
+            {
+              /* hostname changed */
+              strcpy (ipcam_info.hostname, hostname);
+              free (ipcam_info.servicename);
+              ipcam_info.servicename = NULL;
+
+              ipcam_info.state = MDNSD_PROBE;
+            }
+        }
+
+      if (fds[2].revents)
+        {
+          netwatch_dispatch (nlink);
+        }
+
+      if (fds[3].revents)
+        {
+          char message[1024];
+          int ret;
+
+          ret = read (fifo_fd, message, 1023);
+
+          if (ret > 0)
+            {
+              message[ret] = '\0';
+
+              if (!strncmp ("port:", message, 5))
+                {
+                  int port = atoi (message + 5);
+                  if (port > 0 && port < 65536)
+                    update_port_info (&ipcam_info, port);
+                }
+              else
+                {
+                  fprintf (stderr, "mdnsd: got unknown fifo message: %s", message);
+                }
+            }
+          else if (ret < 0)
+            {
+              fprintf (stderr, "mdnsd: can't read from pipe: %s\n", strerror (errno));
+            }
+        }
+
+      switch (ipcam_info.state)
+        {
+          case MDNSD_STARTUP:
+            /* we're waiting for a netwatch based statechange */
+            /* fprintf (stderr, "in STARTUP\n"); */
+            polltime = 5000;
+            break;
+
+          case MDNSD_PROBE:
+            /* fprintf (stderr, "in PROBE\n"); */
+            if (ipcam_info.ptr_to_srv)
+              mdnsd_done (ipcam_info.dnsd, ipcam_info.ptr_to_srv);
+            if (ipcam_info.srv_to_host)
+              mdnsd_done (ipcam_info.dnsd, ipcam_info.srv_to_host);
+            if (ipcam_info.txt_for_srv)
+              mdnsd_done (ipcam_info.dnsd, ipcam_info.txt_for_srv);
+            if (ipcam_info.host_to_ip)
+              mdnsd_done (ipcam_info.dnsd, ipcam_info.host_to_ip);
+            if (ipcam_info.ip_to_host)
+              mdnsd_done (ipcam_info.dnsd, ipcam_info.ip_to_host);
+
+            ipcam_info.ptr_to_srv  = NULL;
+            ipcam_info.srv_to_host = NULL;
+            ipcam_info.txt_for_srv = NULL;
+            ipcam_info.host_to_ip  = NULL;
+            ipcam_info.ip_to_host  = NULL;
+
+            ipcam_info.state = MDNSD_ANNOUNCE;
+            announce_stage = 0;
+            tv.tv_sec = 0;
+            tv.tv_usec = 0;
+            break;
+
+          case MDNSD_ANNOUNCE:
+            /* fprintf (stderr, "in ANNOUNCE\n"); */
+            if (announce_stage < 3)
+              {
+                struct timeval cur_tv;
+                long msecs;
+                gettimeofday (&cur_tv, NULL);
+                msecs = (cur_tv.tv_sec - tv.tv_sec) * 1000 + cur_tv.tv_usec / 1000 - tv.tv_usec / 1000;
+
+                if (tv.tv_sec == 0 || msecs > 755)
+                  {
+                    request_service (&ipcam_info, announce_stage);
+                    announce_stage ++;
+                    tv = cur_tv;
+                    cur_tv = *mdnsd_sleep (ipcam_info.dnsd);
+                    polltime = cur_tv.tv_sec * 1000 + cur_tv.tv_usec / 1000;
+                    if (polltime >= 756)
+                      polltime = 756;
+                  }
+                else
+                  {
+                    cur_tv = *mdnsd_sleep (ipcam_info.dnsd);
+                    polltime = cur_tv.tv_sec * 1000 + cur_tv.tv_usec / 1000;
+                    if (polltime >= 756 - msecs)
+                      polltime = 756 - msecs;
+                  }
+              }
+            else
+              {
+                tv = *mdnsd_sleep (ipcam_info.dnsd);
+                polltime = tv.tv_sec * 1000 + tv.tv_usec / 1000;
+
+                ipcam_info.state = MDNSD_RUN;
+              }
+            break;
+
+          case MDNSD_RUN:
+            tv = *mdnsd_sleep (ipcam_info.dnsd);
+            polltime = tv.tv_sec * 1000 + tv.tv_usec / 1000;
+            break;
+
+          case MDNSD_SHUTDOWN:
+            mdnsd_shutdown (ipcam_info.dnsd);
+            break;
+
+          default:
+            fprintf (stderr, "in default???\n");
+            break;
+        }
+
+      if (fds[1].revents)
+        {
+          while ((bsize = recvfrom (s, buf, MAX_PACKET_LEN, 0,
+                                    (struct sockaddr*) &from, &ssize)) > 0)
+            {
+              bzero (&msg, sizeof (struct message));
+              message_parse (&msg, buf);
+              mdnsd_in (ipcam_info.dnsd, &msg,
+                        (unsigned long int) from.sin_addr.s_addr,
+                        from.sin_port);
+            }
+          if (bsize < 0 && errno != EAGAIN)
+            {
+              fprintf (stderr, "can't read from socket: %s\n", strerror (errno));
+            }
+        }
+
+      while (mdnsd_out (ipcam_info.dnsd, &msg, &remote_ip, &port))
+        {
+          bzero (&to, sizeof (to));
+          to.sin_family = AF_INET;
+          to.sin_port = port;
+          to.sin_addr.s_addr = remote_ip;
+          if (sendto (s, message_packet (&msg), message_packet_len (&msg),
+                      0, (struct sockaddr *) &to,
+                      sizeof (struct sockaddr_in)) != message_packet_len (&msg))
+            {
+              fprintf (stderr, "can't write to socket: %s\n", strerror(errno));
+            }
+        }
+
+      if (ipcam_info.state == MDNSD_SHUTDOWN)
+        break;
+    }
+
+  mdnsd_shutdown (ipcam_info.dnsd);
+  mdnsd_free (ipcam_info.dnsd);
+  return 0;
 }
 
