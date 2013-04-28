@@ -11,43 +11,44 @@
 #include <time.h>
 
 #include "mdnsd.h"
-#include "xht.h"
-#include "sdtxt.h"
+#include "shash.h"
+#include "rfc1035.h"
+#include "dns_sd_txt.h"
 
-void txt_printer (xht h, const char *key, void *val, void *arg)
+void txt_printer (SHASH UNUSED(hash), const char *key, void *val, void *UNUSED(arg))
 {
-  printf ("   %s=%s\n", key, (char *) val);
+    printf ("   %s=%s\n", key, (char *) val);
 }
 
 
 // print an answer
-int ans(mdnsda a, void *arg)
+int ans(TMdnsdAnswer *answer, void *UNUSED(arg))
 {
     int now;
-    xht h;
+    SHASH hash;
     struct in_addr ip_addr;
-    if(a->ttl == 0) now = 0;
-    else now = a->ttl - time(0);
-    switch(a->type)
+    if(answer->ttl == 0) now = 0;
+    else now = answer->ttl - time(0);
+    switch(answer->type)
     {
-    case QTYPE_A:
-        ip_addr.s_addr = a->ip;
-        printf("A %s for %d seconds to ip %s\n",a->name,now,inet_ntoa(ip_addr));
-        break;
-    case QTYPE_PTR:
-        printf("PTR %s for %d seconds to %s\n",a->name,now,a->rdname);
-        break;
-    case QTYPE_SRV:
-        printf("SRV %s for %d seconds to %s:%d\n",a->name,now,a->rdname,a->srv.port);
-        break;
-    case QTYPE_TXT:
-        printf("TXT %s for %d seconds:\n",a->name,now);
-        h = txt2sd (a->rdata, a->rdlen);
-        xht_walk (h, txt_printer, NULL);
-        xht_free (h);
-        break;
-    default:
-        printf("%d %s for %d seconds with %d data\n",a->type,a->name,now,a->rdlen);
+        case QTYPE_A:
+            ip_addr = answer->ip;
+            printf("A %s for %d seconds to ip %s\n",answer->name,now,inet_ntoa(ip_addr));
+            break;
+        case QTYPE_PTR:
+            printf("PTR %s for %d seconds to %s\n",answer->name,now,answer->rdname);
+            break;
+        case QTYPE_SRV:
+            printf("SRV %s for %d seconds to %s:%d\n",answer->name,now,answer->rdname,answer->srv.port);
+            break;
+        case QTYPE_TXT:
+            printf("TXT %s for %d seconds:\n",answer->name,now);
+            hash = DnsTxt2Sd (answer->rdata, answer->rdlen);
+            SHashForEach(hash, txt_printer, NULL);
+            SHashFree (hash);
+            break;
+        default:
+            printf("%d %s for %d seconds with %d data\n",answer->type,answer->name,now,answer->rdlen);
     }
 
     return 0;
@@ -63,7 +64,7 @@ int msock()
 
     bzero(&in, sizeof(in));
     in.sin_family = AF_INET;
-    in.sin_port = htons(5353);
+    in.sin_port = htons(MDNS_PORT);
     in.sin_addr.s_addr = 0;
 
     if((s = socket(AF_INET,SOCK_DGRAM,0)) < 0) return 0;
@@ -88,27 +89,27 @@ int msock()
 
 int main(int argc, char *argv[])
 {
-    mdnsd d;
-    struct message m;
-    unsigned long int ip;
-    unsigned short int port;
+    TMdnsd *d;
+    DNSMESSAGE m;
+    struct in_addr ip;
+    uint16_t port;
     struct timeval *tv;
     int bsize, ssize = sizeof(struct sockaddr_in);
-    unsigned char buf[MAX_PACKET_LEN];
+    uint8_t buf[MAX_PACKET_LEN];
     struct sockaddr_in from, to;
     fd_set fds;
     int s;
 
     if(argc != 3) { printf("usage: mquery 12 _http._tcp.local.\n"); return -1; }
 
-    d = mdnsd_new(1,1000);
+    d = MdnsdNew(1, 1000);
     if((s = msock()) == 0) { printf("can't create socket: %s\n",strerror(errno)); return 1; }
 
-    mdnsd_query(d,argv[2],atoi(argv[1]),ans,0);
+    MdnsdQuery(d,argv[2],atoi(argv[1]),ans,0);
 
     while(1)
     {
-        tv = mdnsd_sleep(d);
+        tv = MdnsdGetMaxSleepTime(d);
         FD_ZERO(&fds);
         FD_SET(s,&fds);
         select(s+1,&fds,0,0,tv);
@@ -117,24 +118,25 @@ int main(int argc, char *argv[])
         {
             while((bsize = recvfrom(s,buf,MAX_PACKET_LEN,0,(struct sockaddr*)&from,&ssize)) > 0)
             {
-                bzero(&m,sizeof(struct message));
-                message_parse(&m,buf);
-                mdnsd_in(d,&m,(unsigned long int)from.sin_addr.s_addr,from.sin_port);
+                bzero(&m,sizeof(DNSMESSAGE));
+                DnsParseMsg(&m,buf);
+                MdnsdInput(d, &m, from.sin_addr, from.sin_port);
             }
             if(bsize < 0 && errno != EAGAIN) { printf("can't read from socket %d: %s\n",errno,strerror(errno)); return 1; }
         }
-        while(mdnsd_out(d,&m,&ip,&port))
+
+        while(MdnsdOutput(d,&m,&ip,&port))
         {
             bzero(&to, sizeof(to));
             to.sin_family = AF_INET;
             to.sin_port = port;
-            to.sin_addr.s_addr = ip;
-            if(sendto(s,message_packet(&m),message_packet_len(&m),0,(struct sockaddr *)&to,sizeof(struct sockaddr_in)) != message_packet_len(&m))  { printf("can't write to socket: %s\n",strerror(errno)); return 1; }
+            to.sin_addr = ip;
+            if(sendto(s,DnsMsg2Pkt(&m),DnsMsgLen(&m),0,(struct sockaddr *)&to,sizeof(struct sockaddr_in)) != DnsMsgLen(&m))  { printf("can't write to socket: %s\n",strerror(errno)); return 1; }
         }
     }
 
-    mdnsd_shutdown(d);
-    mdnsd_free(d);
+    MdnsdShutdown(d);
+    MdnsdFree(d);
     return 0;
 }
 
