@@ -15,7 +15,7 @@ struct xht_struct
 };
 
 /* Generates a hash code for a string.
- * This function uses the ELF hashing algorithm as reprinted in
+ * This function uses the ELF hashing algorithm as reprinted in 
  * Andrew Binstock, "Hashing Rehashed," Dr. Dobb's Journal, April 1996.
  */
 int _xhter(const char *s)

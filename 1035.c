@@ -1,5 +1,5 @@
 #include "1035.h"
-#include <string.h>
+#include <string.h> 
 
 unsigned short int net2short(unsigned char **bufp)
 {
@@ -30,7 +30,7 @@ void short2net(unsigned short int i, unsigned char **bufp)
     *(*bufp + 1) = (unsigned char)i;
     i >>= 8;
     **bufp = (unsigned char)i;
-    *bufp += 2;
+    *bufp += 2;    
 }
 
 void long2net(unsigned long int l, unsigned char **bufp)
@@ -76,7 +76,7 @@ void _label(struct message *m, unsigned char **bufp, unsigned char **namep)
         // copy chars for this label
         memcpy(name,label+1,*label);
         name[*label] = '.';
-    }
+    } 
 
     // advance buffer
     for(label = *bufp; *label != 0 && !(*label & 0xc0 && label++); label += *label + 1);
@@ -104,22 +104,22 @@ int _lmatch(struct message *m, unsigned char *l1, unsigned char *l2)
     // always ensure we get called w/o a pointer
     if(*l1 & 0xc0) return _lmatch(m, m->_buf + _ldecomp(l1),l2);
     if(*l2 & 0xc0) return _lmatch(m, l1, m->_buf + _ldecomp(l2));
-
+    
     // same already?
     if(l1 == l2) return 1;
-
+    
     // compare all label characters
     if(*l1 != *l2) return 0;
-    for(len = 1; len <= *l1; len++)
+    for(len = 1; len <= *l1; len++) 
         if(l1[len] != l2[len]) return 0;
 
     // get new labels
     l1 += *l1 + 1;
     l2 += *l2 + 1;
-
+    
     // at the end, all matched
     if(*l1 == 0 && *l2 == 0) return 1;
-
+    
     // try next labels
     return _lmatch(m,l1,l2);
 }
@@ -224,7 +224,7 @@ int _rrparse(struct message *m, struct resource *rr, int count, unsigned char **
             rr[i].known.srv.weight = net2short(bufp);
             rr[i].known.srv.port = net2short(bufp);
             _label(m, bufp, &(rr[i].known.srv.name));
-            break;
+            break;            
         default:
             *bufp += rr[i].rdlength;
         }
@@ -237,7 +237,7 @@ void message_parse(struct message *m, unsigned char *packet)
 {
     unsigned char *buf;
     int i;
-
+    
     if(packet == 0 || m == 0) return;
 
     // keep all our mem in one (aligned) block for easy freeing
