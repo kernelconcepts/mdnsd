@@ -202,7 +202,7 @@ void request_ip_addresses (ServiceInfo *info)
                 info->host_to_ip  = MdnsdAllocUnique(info->mdnsd, hostlocal,
                                                              QTYPE_A, 120, handle_conflict, info);
             }
-            MdnsdSetRaw (info->mdnsd, info->host_to_ip, (uint8_t *) &ip, 4);
+            MdnsdSetRaw (info->mdnsd, info->host_to_ip, (char *) &ip, 4);
 
             if (!info->ip_to_host) {
                 info->ip_to_host  = MdnsdAllocUnique(info->mdnsd, revlookup,
