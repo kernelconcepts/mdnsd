@@ -111,11 +111,11 @@
 typedef struct _mdnsda_struct  TMdnsdAnswer;
 struct _mdnsda_struct
 {
-    uint8_t *name;
+    char    *name;
     uint16_t type;
     uint32_t ttl;
     uint16_t rdlen;
-    uint8_t *rdata;
+    char    *rdata;
     struct in_addr ip; // A
     uint8_t *rdname;   // NS/CNAME/PTR/SRV
     struct {
@@ -135,7 +135,7 @@ struct _mdnsdr_struct
     TMdnsdAnswer rr;
     int8_t unique; // # of checks performed to ensure
     int    tries;
-    void  (*conflict)(TMdnsdRecord *record, uint8_t *name, int type, void *arg);
+    void  (*conflict)(TMdnsdRecord *record,char *name, int type, void *arg);
     void   *arg;
     TMdnsdRecord *next;
     TMdnsdRecord *list;
@@ -148,7 +148,7 @@ struct _mdnsdr_struct
 typedef struct _query_struct   TQuery;
 struct _query_struct
 {
-    uint8_t *name;
+    char    *name;
     int      type;
     uint32_t nexttry;
     int      tries;
@@ -223,18 +223,18 @@ int MdnsdOutput(TMdnsd *mdnsd, DNSMESSAGE *m, struct in_addr *ip, uint16_t *port
 struct timeval *MdnsdGetMaxSleepTime(TMdnsd *mdnsd);
 
 /* Qery / Answer functions */
-void MdnsdQuery(TMdnsd *mdnsd, uint8_t *host, int type, int (*answer)(TMdnsdAnswer *a, void *arg), void *arg);
-TMdnsdAnswer *MdnsdListCachedAnswers(TMdnsd *mdnsd, uint8_t *host, int type, TMdnsdAnswer *last);
+void MdnsdQuery(TMdnsd *mdnsd, char *host, int type, int (*answer)(TMdnsdAnswer *a, void *arg), void *arg);
+TMdnsdAnswer *MdnsdListCachedAnswers(TMdnsd *mdnsd, char *host, int type, TMdnsdAnswer *last);
 
 /* Publishing functions */
-TMdnsdRecord *MdnsdAllocUnique(TMdnsd *mdnsd, uint8_t *host, int type, uint32_t ttl, void (*conflict)(TMdnsdRecord *record, uint8_t *host, int type, void *arg), void *arg);
-TMdnsdRecord *MdnsdAllocShared(TMdnsd *mdnsd, uint8_t *host, int type, uint32_t ttl);
+TMdnsdRecord *MdnsdAllocUnique(TMdnsd *mdnsd, char *host, int type, uint32_t ttl, void (*conflict)(TMdnsdRecord *record, char *host, int type, void *arg), void *arg);
+TMdnsdRecord *MdnsdAllocShared(TMdnsd *mdnsd, char *host, int type, uint32_t ttl);
 void MdnsdDone(TMdnsd *mdnsd, TMdnsdRecord *record);
 
 /* These all set/update the data for the given record, nothing is published until they are called */
 void MdnsdSetRaw(TMdnsd *mdnsd, TMdnsdRecord *record, uint8_t *data, int len);
-void MdnsdSetHost(TMdnsd *mdnsd, TMdnsdRecord *record, uint8_t *name);
+void MdnsdSetHost(TMdnsd *mdnsd, TMdnsdRecord *record, char *name);
 void MdnsdSetIp(TMdnsd *mdnsd, TMdnsdRecord *record, struct in_addr ip);
-void MdnsdSetSrv(TMdnsd *mdnsd, TMdnsdRecord *record, int priority, int weight, uint16_t port, uint8_t *name);
+void MdnsdSetSrv(TMdnsd *mdnsd, TMdnsdRecord *record, int priority, int weight, uint16_t port, char *name);
 
 #endif

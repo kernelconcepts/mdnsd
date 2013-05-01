@@ -117,7 +117,7 @@
  */
 typedef struct
 {
-    uint8_t *name;
+    char    *name;
     uint16_t type;
     uint16_t class;
 } DNSQUESTION;
@@ -128,7 +128,7 @@ typedef struct
  */
 typedef struct
 {
-    uint8_t *name;
+    char    *name;
     uint16_t type;
     uint16_t class;
     uint32_t ttl;
@@ -137,22 +137,22 @@ typedef struct
     union {
         struct {
             uint32_t ip;
-            uint8_t *name;
+            char *name;
         } a;
         struct {
-            uint8_t *name;
+            char *name;
         } ns;
         struct {
-            uint8_t *name;
+            char *name;
         } cname;
         struct {
-            uint8_t *name;
+            char *name;
         } ptr;
         struct {
             uint16_t priority;
             uint16_t weight;
             uint16_t port;
-            uint8_t *name;
+            char *name;
         } srv;
     } known;
 } DNSRESOURCE;
@@ -185,8 +185,8 @@ typedef struct
     DNSRESOURCE *ar;
 
     /* internal variables */
-    uint8_t* buf;
-    uint8_t* labels[MAX_LABEL];
+    uint8_t *buf;
+    uint8_t *labels[MAX_LABEL];
     int len;
     int label;
 
@@ -213,17 +213,17 @@ void DnsParseMsg(DNSMESSAGE *msg, uint8_t *packet);
 DNSMESSAGE *DnsCreateMsg(void);
 
 /* Append a question to the message buffer */
-void DnsMsgAdd_qd(DNSMESSAGE *msg, uint8_t *name, uint16_t type, uint16_t class);
+void DnsMsgAdd_qd(DNSMESSAGE *msg, char *name, uint16_t type, uint16_t class);
 
 /* Append a resource record to the message. Call these functions in the below order. */
-void DnsMsgAdd_an(DNSMESSAGE *msg, uint8_t *name, uint16_t type, uint16_t class, uint32_t ttl);
-void DnsMsgAdd_ns(DNSMESSAGE *msg, uint8_t *name, uint16_t type, uint16_t class, uint32_t ttl);
-void DnsMsgAdd_ar(DNSMESSAGE *msg, uint8_t *name, uint16_t type, uint16_t class, uint32_t ttl);
+void DnsMsgAdd_an(DNSMESSAGE *msg, char *name, uint16_t type, uint16_t class, uint32_t ttl);
+void DnsMsgAdd_ns(DNSMESSAGE *msg, char *name, uint16_t type, uint16_t class, uint32_t ttl);
+void DnsMsgAdd_ar(DNSMESSAGE *msg, char *name, uint16_t type, uint16_t class, uint32_t ttl);
 
 /* Append resource data types blocks */
 void DnsMsgAdd_rdata_long(DNSMESSAGE *msg, uint32_t val);
-void DnsMsgAdd_rdata_name(DNSMESSAGE *msg, uint8_t *name);
-void DnsMsgAdd_rdata_srv(DNSMESSAGE *msg, uint16_t priority, uint16_t weight, uint16_t port, uint8_t *name);
+void DnsMsgAdd_rdata_name(DNSMESSAGE *msg, char *name);
+void DnsMsgAdd_rdata_srv(DNSMESSAGE *msg, uint16_t priority, uint16_t weight, uint16_t port, char *name);
 void DnsMsgAdd_rdata_raw(DNSMESSAGE *msg, uint8_t *rdata, uint16_t rdlength);
 
 /* Generate the message packet to be send out and return the length */

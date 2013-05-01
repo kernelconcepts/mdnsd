@@ -191,10 +191,10 @@ static uint16_t LabelDecompress(uint8_t *ptr)
  * \param buf   Pointer to the package data buffer
  * \param namep Pointer to the string buffer, where the label will be copied to
  */
-static void ExtractLabel(DNSMESSAGE *msg, uint8_t **buf, uint8_t **namep)
+static void ExtractLabel(DNSMESSAGE *msg, uint8_t **buf, char **namep)
 {
     uint8_t *label;
-    uint8_t *name;
+    char *name;
     int x;
 
     /* Set the name pointer to the end of the data block */
@@ -219,7 +219,7 @@ static void ExtractLabel(DNSMESSAGE *msg, uint8_t **buf, uint8_t **namep)
         }
 
         /* Copy label to the name buffer */
-        memcpy(name, label+1,*label);
+        memcpy(name, label+1, *label);
         name[*label] = '.';
 
         name  += *label + 1;
@@ -316,7 +316,7 @@ static int MatchLabel(DNSMESSAGE *msg, uint8_t *label1, uint8_t *label2)
  *
  * \return          Length of the label
  */
-static int Host2Label(DNSMESSAGE *msg, uint8_t **buf, uint8_t *name)
+static int Host2Label(DNSMESSAGE *msg, uint8_t **buf, char *name)
 {
     uint8_t  label[MAX_LABEL_SIZE];
     uint8_t *l;
@@ -612,7 +612,7 @@ void DnsParseMsg(DNSMESSAGE *msg, uint8_t *packet)
  * \param class     Query class
  * \param ttl       TTL value
  */
-static void DnsAppendRR(DNSMESSAGE *msg, uint8_t *name, uint16_t type, uint16_t class, uint32_t ttl)
+static void DnsAppendRR(DNSMESSAGE *msg, char *name, uint16_t type, uint16_t class, uint32_t ttl)
 {
     if (msg->buf == 0) {
         /* Initialise the buffer pointer */
@@ -635,7 +635,7 @@ static void DnsAppendRR(DNSMESSAGE *msg, uint8_t *name, uint16_t type, uint16_t 
  * \param type      Query type
  * \param class     Query class
  */
-void DnsMsgAdd_qd(DNSMESSAGE *msg, uint8_t *name, uint16_t type, uint16_t class)
+void DnsMsgAdd_qd(DNSMESSAGE *msg, char *name, uint16_t type, uint16_t class)
 {
     msg->qdcount++;
     if (msg->buf == 0) {
@@ -659,7 +659,7 @@ void DnsMsgAdd_qd(DNSMESSAGE *msg, uint8_t *name, uint16_t type, uint16_t class)
  * \param type      Query type
  * \param class     Query class
  */
-void DnsMsgAdd_an(DNSMESSAGE *msg, uint8_t *name, uint16_t type, uint16_t class, uint32_t ttl)
+void DnsMsgAdd_an(DNSMESSAGE *msg, char *name, uint16_t type, uint16_t class, uint32_t ttl)
 {
     msg->ancount++;
     DnsAppendRR(msg, name, type, class, ttl);
@@ -676,7 +676,7 @@ void DnsMsgAdd_an(DNSMESSAGE *msg, uint8_t *name, uint16_t type, uint16_t class,
  * \param type      Query type
  * \param class     Query class
  */
-void DnsMsgAdd_ns(DNSMESSAGE *msg, uint8_t *name, uint16_t type, uint16_t class, uint32_t ttl)
+void DnsMsgAdd_ns(DNSMESSAGE *msg, char *name, uint16_t type, uint16_t class, uint32_t ttl)
 {
     msg->nscount++;
     DnsAppendRR(msg, name, type, class, ttl);
@@ -691,7 +691,7 @@ void DnsMsgAdd_ns(DNSMESSAGE *msg, uint8_t *name, uint16_t type, uint16_t class,
  * \param type      Query type
  * \param class     Query class
  */
-void DnsMsgAdd_ar(DNSMESSAGE *msg, uint8_t *name, uint16_t type, uint16_t class, uint32_t ttl)
+void DnsMsgAdd_ar(DNSMESSAGE *msg, char *name, uint16_t type, uint16_t class, uint32_t ttl)
 {
     msg->arcount++;
     DnsAppendRR(msg, name, type, class, ttl);
@@ -717,7 +717,7 @@ void DnsMsgAdd_rdata_long(DNSMESSAGE *msg, uint32_t val)
  * \param msg       DNS message
  * \param name      Hostname
  */
-void DnsMsgAdd_rdata_name(DNSMESSAGE *msg, uint8_t *name)
+void DnsMsgAdd_rdata_name(DNSMESSAGE *msg, char *name)
 {
     uint8_t *tmp_buf = msg->buf;
     msg->buf += 2;
@@ -733,7 +733,7 @@ void DnsMsgAdd_rdata_name(DNSMESSAGE *msg, uint8_t *name)
  * \param port      TCP / UDP port number of the service
  * \param name      The canonical hostname of the machine providing the service.
  */
-void DnsMsgAdd_rdata_srv(DNSMESSAGE *msg, uint16_t priority, uint16_t weight, uint16_t port, uint8_t *name)
+void DnsMsgAdd_rdata_srv(DNSMESSAGE *msg, uint16_t priority, uint16_t weight, uint16_t port, char *name)
 {
     uint8_t *tmp_buf = msg->buf;
     msg->buf += 2;

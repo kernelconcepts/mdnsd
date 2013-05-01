@@ -120,9 +120,9 @@
  * \return      The calculated hash value
  */
 
-static int NameHash(const int8_t *str)
+static int NameHash(const char *str)
 {
-    const uint8_t *name = (const uint8_t *)str;
+    const char *name = (const char *)str;
     uint32_t hash = 0;
     uint32_t g;
 
@@ -151,7 +151,7 @@ static int NameHash(const int8_t *str)
  *
  * \return          The next matching query or NULL
  */
-static TQuery *QueryNext(TMdnsd *mdnsd, TQuery *query, int8_t *host, int type)
+static TQuery *QueryNext(TMdnsd *mdnsd, TQuery *query, char *host, int type)
 {
     if (query == NULL) {
         query = mdnsd->queries[NameHash(host) % SPRIME];
@@ -183,7 +183,7 @@ static TQuery *QueryNext(TMdnsd *mdnsd, TQuery *query, int8_t *host, int type)
  *
  * \return          The next matching cache entry or NULL
  */
-static TCached *CachedNext(TMdnsd *mdnsd, TCached *cached, uint8_t *host, int type)
+static TCached *CachedNext(TMdnsd *mdnsd, TCached *cached, char *host, int type)
 {
     if (cached == NULL) {
         cached = mdnsd->cache[NameHash(host) % LPRIME];
@@ -214,7 +214,7 @@ static TCached *CachedNext(TMdnsd *mdnsd, TCached *cached, uint8_t *host, int ty
  *
  * \return          The next matching dns record or NULL
  */
-static TMdnsdRecord *RecordNext(TMdnsd *mdnsd, TMdnsdRecord *record, uint8_t *host, int type)
+static TMdnsdRecord *RecordNext(TMdnsd *mdnsd, TMdnsdRecord *record, char *host, int type)
 {
     if (record == NULL) {
         record = mdnsd->published[NameHash(host) % SPRIME];
@@ -813,7 +813,7 @@ void MdnsdFree(TMdnsd *mdnsd)
 }
 
 #ifdef MDNSD_DEBUG
-uint8_t *MdnsdDecodeType(uint16_t type)
+char *MdnsdDecodeType(uint16_t type)
 {
     switch (type) {
         case QTYPE_A:     return "A";
@@ -860,7 +860,7 @@ void MdnsdDumpRessource (FILE *file, DNSRESOURCE *res)
     }
 }
 
-void mdnsd_dump (FILE *file, DNSMESSAGE *msg, uint8_t *type)
+void mdnsd_dump (FILE *file, DNSMESSAGE *msg, char *type)
 {
     int idx;
 
@@ -1334,7 +1334,7 @@ out:
  *
  * \return          Maximum time after which MdnsdOutput needs to be called again
  */
-void MdnsdQuery(TMdnsd *mdnsd, uint8_t *host, int type, int (*answer)(TMdnsdAnswer *answer, void *arg), void *arg)
+void MdnsdQuery(TMdnsd *mdnsd, char *host, int type, int (*answer)(TMdnsdAnswer *answer, void *arg), void *arg)
 {
     TQuery  *query;
     TCached *current = NULL;
@@ -1388,7 +1388,7 @@ void MdnsdQuery(TMdnsd *mdnsd, uint8_t *host, int type, int (*answer)(TMdnsdAnsw
  *
  * \return          next cached answer
  */
-TMdnsdAnswer *MdnsdListCachedAnswers(TMdnsd *mdnsd, uint8_t *host, int type, TMdnsdAnswer *last)
+TMdnsdAnswer *MdnsdListCachedAnswers(TMdnsd *mdnsd, char *host, int type, TMdnsdAnswer *last)
 {
     return (TMdnsdAnswer *)CachedNext(mdnsd, (TCached *)last, host, type);
 }
@@ -1409,7 +1409,7 @@ TMdnsdAnswer *MdnsdListCachedAnswers(TMdnsd *mdnsd, uint8_t *host, int type, TMd
  *
  * \return          newly allocated share record
  */
-TMdnsdRecord *MdnsdAllocShared(TMdnsd *mdnsd, uint8_t *host, int type, uint32_t ttl)
+TMdnsdRecord *MdnsdAllocShared(TMdnsd *mdnsd, char *host, int type, uint32_t ttl)
 {
     int idx;
     TMdnsdRecord *record;
@@ -1451,7 +1451,7 @@ TMdnsdRecord *MdnsdAllocShared(TMdnsd *mdnsd, uint8_t *host, int type, uint32_t 
  *
  * \return          newly allocated share record
  */
-TMdnsdRecord *MdnsdAllocUnique(TMdnsd *mdnsd, uint8_t *host, int type, uint32_t ttl, void (*conflict)(TMdnsdRecord *record, uint8_t *host, int type, void *arg), void *arg)
+TMdnsdRecord *MdnsdAllocUnique(TMdnsd *mdnsd, char *host, int type, uint32_t ttl, void (*conflict)(TMdnsdRecord *record, char *host, int type, void *arg), void *arg)
 {
     TMdnsdRecord *record;
     record = MdnsdAllocShared(mdnsd, host, type, ttl);
@@ -1517,7 +1517,7 @@ void MdnsdSetRaw(TMdnsd *mdnsd, TMdnsdRecord *record, uint8_t *data, int len)
  * \param record    The record which shall be de-listed
  * \param name      Hostname
  */
-void MdnsdSetHost(TMdnsd *mdnsd, TMdnsdRecord *record, uint8_t *name)
+void MdnsdSetHost(TMdnsd *mdnsd, TMdnsdRecord *record, char *name)
 {
     free(record->rr.rdname);
     record->rr.rdname = strdup(name);
@@ -1549,7 +1549,7 @@ void MdnsdSetIp(TMdnsd *mdnsd, TMdnsdRecord *record, struct in_addr ip)
  * \param port      TCP / UDP port number of the service
  * \param name      The canonical hostname of the machine providing the service.
  */
-void MdnsdSetSrv(TMdnsd *mdnsd, TMdnsdRecord *record, int priority, int weight, uint16_t port, uint8_t *name)
+void MdnsdSetSrv(TMdnsd *mdnsd, TMdnsdRecord *record, int priority, int weight, uint16_t port, char *name)
 {
     record->rr.srv.priority = priority;
     record->rr.srv.weight = weight;
