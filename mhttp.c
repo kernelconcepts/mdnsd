@@ -91,7 +91,7 @@ char *increment_name (char *name)
 
 
 /* conflict handling */
-void handle_conflict (TMdnsdRecord *record, uint8_t *name, int UNUSED(type), void *arg)
+void handle_conflict (TMdnsdRecord *record, char *name, int UNUSED(type), void *arg)
 {
     ServiceInfo *info = (ServiceInfo *) arg;
     char *newname;
