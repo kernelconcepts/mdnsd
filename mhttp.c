@@ -68,7 +68,7 @@ char *increment_name (char *name)
 {
     int   id = 1;
     char *pos;
-	char *end = NULL;
+    char *end = NULL;
     char *ret = NULL;
 
     pos = strrchr (name, '-');
@@ -77,9 +77,9 @@ char *increment_name (char *name)
         id = strtol (pos + 1, &end, 10);
         if (*end == '\0') {
             *pos = '\0';
-		} else {
+        } else {
             id = 1;
-		}
+        }
     }
 
     id += 1;
@@ -120,16 +120,16 @@ void handle_conflict (TMdnsdRecord *record, char *name, int UNUSED(type), void *
 
     if (record == info->srv_to_host) {
         info->srv_to_host = NULL;
-	}
+    }
 
     if (record == info->txt_for_srv) {
         info->txt_for_srv = NULL;
-	}
+    }
 
     fprintf (stderr, "conflicting name \"%s\". trying %s\n",
              name, info->servicename);
 
-	/* The hostname was changed, so go back to probe state */
+    /* The hostname was changed, so go back to probe state */
     info->state = MDNSD_PROBE;
 }
 
@@ -147,8 +147,8 @@ void sighandler (int sig)
 int msock ()
 {
     int    sock_fd;
-	int    flag = 1;
-	int    ittl = 255;
+    int    flag = 1;
+    int    ittl = 255;
     char   ttl = 255;
     struct sockaddr_in in;
     struct ip_mreq mc;
@@ -160,7 +160,7 @@ int msock ()
 
     if ((sock_fd = socket (AF_INET, SOCK_DGRAM, 0)) < 0) {
         return 0;
-	}
+    }
 
     setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, (char*) &flag, sizeof (flag));
     if (bind (sock_fd, (struct sockaddr*) &in, sizeof (in))) {
@@ -184,7 +184,7 @@ int msock ()
 void request_ip_addresses (ServiceInfo *info)
 {
     char revlookup[256];
-	char hostlocal[256];
+    char hostlocal[256];
     struct in_addr ip;
     int  num_ips = 0;
 
@@ -217,10 +217,10 @@ void request_ip_addresses (ServiceInfo *info)
     } else {
         if (info->host_to_ip) {
             MdnsdDone (service_info.mdnsd, info->host_to_ip);
-		}
+        }
         if (info->ip_to_host) {
             MdnsdDone (service_info.mdnsd, info->ip_to_host);
-		}
+        }
 
         info->host_to_ip = NULL;
         info->ip_to_host = NULL;
@@ -231,8 +231,8 @@ void request_ip_addresses (ServiceInfo *info)
 void request_service (ServiceInfo *info, int stage)
 {
     uint8_t *packet;
-	char     servlocal[256];
-	char     hostlocal[256];
+    char     servlocal[256];
+    char     hostlocal[256];
     int      len = 0;
 
     sprintf (servlocal, "%s._http._tcp.local.",
@@ -290,7 +290,7 @@ void request_service (ServiceInfo *info, int stage)
                 fprintf (stderr, "Announcing \"%s.local\" to %s:%d\n",
                          info->servicename ? info->servicename : info->hostname,
                          info->ip, info->port);
-			}
+            }
             break;
 
         default:
@@ -305,12 +305,12 @@ int main(int argc, char *argv[])
     uint16_t   port;
     struct timeval tv;
     int        bsize;
-	int        ssize = sizeof(struct sockaddr_in);
+    int        ssize = sizeof(struct sockaddr_in);
     uint8_t    buf[MAX_PACKET_LEN];
     struct sockaddr_in from;
-	struct sockaddr_in to;
+    struct sockaddr_in to;
     int        idx;
-	int        s;
+    int        s;
     struct in_addr remote_ip;
     char      *value;
     int        polltime = 0;
@@ -328,8 +328,8 @@ int main(int argc, char *argv[])
 
     service_info.mdnsd = MdnsdNew (1, 1000);
 
-	//gethostname (service_info.hostname, HOSTNAMESIZE);
-	sprintf(service_info.hostname, "reinhardt");
+    //gethostname (service_info.hostname, HOSTNAMESIZE);
+    sprintf(service_info.hostname, "reinhardt");
     service_info.hostname[HOSTNAMESIZE-1] = '\0';
     if (strchr (service_info.hostname, '.'))
         strchr (service_info.hostname, '.')[0] = '\0';
@@ -383,17 +383,17 @@ int main(int argc, char *argv[])
         {
             case MDNSD_PROBE:
 
-				if (service_info.ptr_to_srv) {
+                if (service_info.ptr_to_srv) {
                     MdnsdDone (service_info.mdnsd, service_info.ptr_to_srv);
-				}
+                }
 
-				if (service_info.srv_to_host) {
+                if (service_info.srv_to_host) {
                     MdnsdDone (service_info.mdnsd, service_info.srv_to_host);
-				}
+                }
 
                 if (service_info.txt_for_srv) {
                     MdnsdDone (service_info.mdnsd, service_info.txt_for_srv);
-				}
+                }
 
                 service_info.ptr_to_srv     = NULL;
                 service_info.srv_to_host    = NULL;
@@ -401,11 +401,11 @@ int main(int argc, char *argv[])
 
                 if (service_info.host_to_ip) {
                     MdnsdDone (service_info.mdnsd, service_info.host_to_ip);
-				}
+                }
 
                 if (service_info.ip_to_host) {
                     MdnsdDone (service_info.mdnsd, service_info.ip_to_host);
-				}
+                }
 
                 service_info.host_to_ip  = NULL;
                 service_info.ip_to_host  = NULL;
@@ -433,13 +433,13 @@ int main(int argc, char *argv[])
                         polltime = cur_tv.tv_sec * 1000 + cur_tv.tv_usec / 1000;
                         if (polltime >= 756) {
                             polltime = 756;
-						}
+                        }
                     } else {
                         cur_tv = *MdnsdGetMaxSleepTime (service_info.mdnsd);
                         polltime = cur_tv.tv_sec * 1000 + cur_tv.tv_usec / 1000;
                         if (polltime >= 756 - msecs) {
                             polltime = 756 - msecs;
-						}
+                        }
                     }
                 } else {
                     tv = *MdnsdGetMaxSleepTime (service_info.mdnsd);
@@ -491,7 +491,7 @@ int main(int argc, char *argv[])
 
         if (service_info.state == MDNSD_SHUTDOWN) {
             break;
-		}
+        }
     }
 
     MdnsdShutdown (service_info.mdnsd);

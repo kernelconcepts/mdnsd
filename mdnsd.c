@@ -122,7 +122,7 @@
 
 static int NameHash(const char *str)
 {
-	/* ELF hash uses uint8_ts and unsigned arithmetic for portability */
+    /* ELF hash uses uint8_ts and unsigned arithmetic for portability */
     const uint8_t *name = (uint8_t *)str;
     uint32_t hash = 0;
     uint32_t g;
@@ -132,7 +132,7 @@ static int NameHash(const char *str)
         hash = (hash << 4) + (unsigned long)(tolower (*name++));
         if ((g = (hash & 0xF0000000UL))!=0) {
             hash ^= (g >> 24);
-		}
+        }
         hash &= ~g;
     }
 
