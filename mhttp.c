@@ -54,6 +54,7 @@ typedef struct _service_info
     TMdnsdRecord  *srv_to_host;
     TMdnsdRecord  *txt_for_srv;
 
+    TMdnsdRecord  *ptr_to_srvtype;
     TMdnsdRecord  *ptr_to_srv;
 
     TMdnsdState    state;
@@ -286,6 +287,12 @@ void request_service (ServiceInfo *info, int stage)
             }
             MdnsdSetHost (info->mdnsd, info->ptr_to_srv, servlocal);
 
+			if (!info->ptr_to_srvtype) {
+				info->ptr_to_srvtype = MdnsdAllocShared (info->mdnsd, "_services._dns-sd._udp.local.",
+												  QTYPE_PTR, 4500);
+			}
+			MdnsdSetHost (info->mdnsd, info->ptr_to_srvtype, "_http._tcp.local.");
+
             if (info->ip) {
                 fprintf (stderr, "Announcing \"%s.local\" to %s:%d\n",
                          info->servicename ? info->servicename : info->hostname,
@@ -319,9 +326,10 @@ int main(int argc, char *argv[])
 
     if(argc < 4)
     {
-        fprintf (stderr, "usage: mhttp <ip> <port> <key1>=<value1> <key2>=<value2> ...\n");
-        fprintf (stderr, "   <ip>  The IP address to promote\n");
-        fprintf (stderr, "   <port> is the port number of the service to be advertized\n");
+        fprintf (stderr, "usage: mhttp <hostname> <ip> <port> <key1>=<value1> <key2>=<value2> ...\n");
+        fprintf (stderr, "   <hostname>  The hostname which shall be promoted as 'hostname.local'\n");
+        fprintf (stderr, "   <ip>        The IP address to promote\n");
+        fprintf (stderr, "   <port>      is the port number of the service to be advertized\n");
         fprintf (stderr, "   <key>=<value> are the keys that get embedded into the TXT record.\n");
         return -1;
     }
@@ -329,22 +337,23 @@ int main(int argc, char *argv[])
     service_info.mdnsd = MdnsdNew (1, 1000);
 
     //gethostname (service_info.hostname, HOSTNAMESIZE);
-    sprintf(service_info.hostname, "reinhardt");
+    strncpy(service_info.hostname, argv[1], HOSTNAMESIZE-1);
     service_info.hostname[HOSTNAMESIZE-1] = '\0';
+
     if (strchr (service_info.hostname, '.'))
         strchr (service_info.hostname, '.')[0] = '\0';
 
     service_info.servicename = NULL;
 
-    service_info.ip          = strdup(argv[1]);
+    service_info.ip          = strdup(argv[2]);
     service_info.announce_ip.s_addr = inet_addr(service_info.ip);
     service_info.host_to_ip  = NULL;
     service_info.ip_to_host  = NULL;
 
-    service_info.port = atoi(argv[2]);
+    service_info.port = atoi(argv[3]);
 
     service_info.metadata = SHashInit (11);
-    for (idx = 2; idx < argc; idx++) {
+    for (idx = 3; idx < argc; idx++) {
         value = index (argv[idx], '=');
         if (value) {
             value[0] = '\0';
@@ -353,6 +362,7 @@ int main(int argc, char *argv[])
         }
     }
 
+    service_info.ptr_to_srvtype = NULL;
     service_info.ptr_to_srv     = NULL;
     service_info.srv_to_host    = NULL;
     service_info.txt_for_srv    = NULL;
@@ -383,6 +393,10 @@ int main(int argc, char *argv[])
         {
             case MDNSD_PROBE:
 
+                if (service_info.ptr_to_srvtype) {
+                    MdnsdDone (service_info.mdnsd, service_info.ptr_to_srvtype);
+                }
+
                 if (service_info.ptr_to_srv) {
                     MdnsdDone (service_info.mdnsd, service_info.ptr_to_srv);
                 }
@@ -395,6 +409,7 @@ int main(int argc, char *argv[])
                     MdnsdDone (service_info.mdnsd, service_info.txt_for_srv);
                 }
 
+                service_info.ptr_to_srvtype = NULL;
                 service_info.ptr_to_srv     = NULL;
                 service_info.srv_to_host    = NULL;
                 service_info.txt_for_srv    = NULL;
